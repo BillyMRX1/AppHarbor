@@ -1,0 +1,120 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="920" viewBox="0 0 1600 920" role="img" aria-labelledby="title desc">
+  <title id="title">AppHarbor interface illustration</title>
+  <desc id="desc">A conceptual illustration of AppHarbor's macOS software library, with a native sidebar, searchable inventory list, and selected installation inspector.</desc>
+  <defs>
+    <linearGradient id="backdrop" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#eaf0f4"/><stop offset="1" stop-color="#dbe6ec"/></linearGradient>
+    <linearGradient id="window" x1="0" y1="0" x2="0" y2="1"><stop stop-color="#fff"/><stop offset="1" stop-color="#fbfcfd"/></linearGradient>
+    <linearGradient id="mark" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#397f9c"/><stop offset="1" stop-color="#17445e"/></linearGradient>
+    <filter id="shadow" x="-15%" y="-15%" width="130%" height="140%"><feDropShadow dx="0" dy="18" stdDeviation="22" flood-color="#17384a" flood-opacity=".17"/></filter>
+  </defs>
+  <rect width="1600" height="920" rx="28" fill="url(#backdrop)"/>
+  <circle cx="1450" cy="120" r="210" fill="#c6dce5" opacity=".46"/>
+  <circle cx="115" cy="820" r="250" fill="#cbdce3" opacity=".4"/>
+  <g filter="url(#shadow)">
+    <rect x="100" y="86" width="1400" height="748" rx="20" fill="url(#window)" stroke="#c8d3da" stroke-width="2"/>
+    <!-- macOS title and toolbar region -->
+    <path d="M120 86h1360a20 20 0 0 1 20 20v62H100v-62a20 20 0 0 1 20-20z" fill="#f7f8fa"/>
+    <path d="M100 168h1400" stroke="#dfe4e8" stroke-width="2"/>
+    <circle cx="132" cy="122" r="7" fill="#ee6a5f"/><circle cx="156" cy="122" r="7" fill="#f5bd4f"/><circle cx="180" cy="122" r="7" fill="#61c454"/>
+    <text x="548" y="128" text-anchor="middle" font-family="-apple-system,BlinkMacSystemFont,Arial,sans-serif" font-size="16" fill="#56616b" font-weight="600">AppHarbor</text>
+    <rect x="838" y="101" width="332" height="38" rx="9" fill="#eceff2"/>
+    <circle cx="858" cy="120" r="6" fill="none" stroke="#79858f" stroke-width="2"/><path d="m862 124 5 5" stroke="#79858f" stroke-width="2" stroke-linecap="round"/>
+    <text x="879" y="126" font-family="-apple-system,BlinkMacSystemFont,Arial,sans-serif" font-size="14" fill="#7d8790">Search software</text>
+    <rect x="1190" y="101" width="98" height="38" rx="9" fill="#e8ecef"/>
+    <rect x="1193" y="104" width="46" height="32" rx="7" fill="#fff" stroke="#dce2e6"/>
+    <path d="M1207 114h18m-18 5h18m-18 5h12" stroke="#536879" stroke-width="2" stroke-linecap="round"/>
+    <rect x="1252" y="111" width="9" height="9" rx="2" fill="none" stroke="#85929b" stroke-width="1.7"/><rect x="1266" y="111" width="9" height="9" rx="2" fill="none" stroke="#85929b" stroke-width="1.7"/><rect x="1252" y="123" width="9" height="9" rx="2" fill="none" stroke="#85929b" stroke-width="1.7"/><rect x="1266" y="123" width="9" height="9" rx="2" fill="none" stroke="#85929b" stroke-width="1.7"/>
+    <rect x="1310" y="101" width="154" height="38" rx="9" fill="#e8ecef"/>
+    <path d="M1334 120a9 9 0 1 1 3 7" fill="none" stroke="#536879" stroke-width="2" stroke-linecap="round"/><path d="m1332 124 5 3 1-6" fill="none" stroke="#536879" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+    <text x="1368" y="126" font-family="-apple-system,BlinkMacSystemFont,Arial,sans-serif" font-size="14" fill="#465563" font-weight="600">Refresh</text>
+    <!-- sidebar -->
+    <rect x="101" y="169" width="245" height="664" fill="#f5f7f9"/>
+    <path d="M346 169v664" stroke="#dce2e6" stroke-width="2"/>
+    <text x="123" y="204" font-family="-apple-system,BlinkMacSystemFont,Arial,sans-serif" font-size="12" fill="#818b94" font-weight="700" letter-spacing="1.2">LIBRARY</text>
+    <rect x="112" y="218" width="222" height="38" rx="8" fill="#dce9ef"/>
+    <g font-family="-apple-system,BlinkMacSystemFont,Arial,sans-serif" font-size="15" fill="#344653">
+      <text x="154" y="243" font-weight="600">All Software</text><text x="310" y="243" text-anchor="end" fill="#7d8992">24</text>
+      <text x="154" y="286">Applications</text><text x="310" y="286" text-anchor="end" fill="#7d8992">11</text>
+      <text x="154" y="329">Command Line</text><text x="310" y="329" text-anchor="end" fill="#7d8992">13</text>
+      <text x="154" y="372">Updates</text><text x="310" y="372" text-anchor="end" fill="#7d8992">3</text>
+      <text x="154" y="415">Activity</text>
+    </g>
+    <g fill="none" stroke="#738692" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M132 232h12m-6-6v12"/><rect x="129" y="271" width="15" height="15" rx="3"/><path d="M129 314h15m-15 5h15m-15 5h10"/><path d="M131 360a8 8 0 1 1 2 6m-3-2 3 2 2-4"/><path d="M129 402h15v13h-15zM132 398v4m9-4v4"/>
+    </g>
+    <text x="123" y="463" font-family="-apple-system,BlinkMacSystemFont,Arial,sans-serif" font-size="12" fill="#818b94" font-weight="700" letter-spacing="1.2">SOURCES</text>
+    <g font-family="-apple-system,BlinkMacSystemFont,Arial,sans-serif" font-size="14" fill="#465563">
+      <text x="154" y="499">Homebrew</text><text x="310" y="499" text-anchor="end" fill="#7d8992">8</text>
+      <text x="154" y="537">npm</text><text x="310" y="537" text-anchor="end" fill="#7d8992">6</text>
+      <text x="154" y="575">pipx</text><text x="310" y="575" text-anchor="end" fill="#7d8992">2</text>
+      <text x="154" y="613">Applications</text><text x="310" y="613" text-anchor="end" fill="#7d8992">8</text>
+    </g>
+    <g fill="none" stroke="#738692" stroke-width="2" stroke-linecap="round"><path d="M132 489h12v12h-12zM129 527h16v12h-16zM130 565h14v12h-14zM131 604h14v12h-14z"/></g>
+    <path d="M112 794h218" stroke="#e0e5e8"/>
+    <circle cx="132" cy="814" r="8" fill="#5b9a79"/><text x="150" y="819" font-family="-apple-system,BlinkMacSystemFont,Arial,sans-serif" font-size="12" fill="#75818a">24 items · 4 sources</text>
+    <!-- library content -->
+    <text x="378" y="211" font-family="-apple-system,BlinkMacSystemFont,Arial,sans-serif" font-size="24" fill="#293945" font-weight="700">All Software</text>
+    <text x="378" y="240" font-family="-apple-system,BlinkMacSystemFont,Arial,sans-serif" font-size="13" fill="#7d8992">Supported app folders and detected package manager scopes</text>
+    <rect x="1212" y="190" width="103" height="32" rx="8" fill="#f1f3f5"/>
+    <text x="1264" y="211" text-anchor="middle" font-family="-apple-system,BlinkMacSystemFont,Arial,sans-serif" font-size="13" fill="#52636f">All Types</text>
+    <rect x="1324" y="190" width="130" height="32" rx="8" fill="#f1f3f5"/>
+    <text x="1389" y="211" text-anchor="middle" font-family="-apple-system,BlinkMacSystemFont,Arial,sans-serif" font-size="13" fill="#52636f">All Sources</text>
+    <text x="1459" y="247" text-anchor="end" font-family="-apple-system,BlinkMacSystemFont,Arial,sans-serif" font-size="12" fill="#82909a">24 items</text>
+    <path d="M368 261h1100" stroke="#e1e5e8"/>
+    <g font-family="-apple-system,BlinkMacSystemFont,Arial,sans-serif" font-size="12" fill="#7d8992" font-weight="600">
+      <text x="404" y="289">NAME</text><text x="776" y="289">SOURCE</text><text x="955" y="289">VERSION</text><text x="1081" y="289">KIND</text>
+    </g>
+    <path d="M368 301h1100" stroke="#e7eaed"/>
+    <!-- selected item -->
+    <rect x="368" y="302" width="1100" height="54" fill="#e8f0f4"/>
+    <rect x="382" y="312" width="34" height="34" rx="8" fill="#e87e54"/>
+    <path d="M390 337v-13l9-6 9 6v13h-18z" fill="#fff" opacity=".94"/><path d="M396 337v-8h7v8" fill="none" stroke="#e87e54" stroke-width="1.6"/>
+    <g font-family="-apple-system,BlinkMacSystemFont,Arial,sans-serif" font-size="14" fill="#344653"><text x="427" y="334" font-weight="600">Dockside</text><text x="776" y="334">Homebrew cask</text><text x="955" y="334">1.8.0</text><text x="1081" y="334">Application</text></g>
+    <path d="M368 356h1100" stroke="#e7eaed"/>
+    <!-- row 2 -->
+    <rect x="382" y="366" width="34" height="34" rx="8" fill="#405f82"/><circle cx="399" cy="383" r="9" fill="#e4eff5"/><path d="M399 376v14m-7-7h14" stroke="#405f82" stroke-width="2"/>
+    <g font-family="-apple-system,BlinkMacSystemFont,Arial,sans-serif" font-size="14" fill="#475762"><text x="427" y="388">Lighthouse</text><text x="776" y="388">Homebrew cask</text><text x="955" y="388">1.3.0</text><text x="1081" y="388">Application</text></g><path d="M368 410h1100" stroke="#e7eaed"/>
+    <!-- row 3 -->
+    <rect x="382" y="420" width="34" height="34" rx="8" fill="#6876bf"/><path d="M392 442l7-17 7 17h-4l-3-7-3 7z" fill="#fff"/>
+    <g font-family="-apple-system,BlinkMacSystemFont,Arial,sans-serif" font-size="14" fill="#475762"><text x="427" y="442">swift-format</text><text x="776" y="442">Homebrew</text><text x="955" y="442">600.0.0</text><text x="1081" y="442">Command line</text></g><path d="M368 464h1100" stroke="#e7eaed"/>
+    <!-- row 4 -->
+    <rect x="382" y="474" width="34" height="34" rx="8" fill="#4c8c79"/><path d="M392 492h14m-7-7v14" stroke="#fff" stroke-width="2.4" stroke-linecap="round"/>
+    <g font-family="-apple-system,BlinkMacSystemFont,Arial,sans-serif" font-size="14" fill="#475762"><text x="427" y="496">httpie</text><text x="776" y="496">pipx</text><text x="955" y="496">3.2.2</text><text x="1081" y="496">Command line</text></g><path d="M368 518h1100" stroke="#e7eaed"/>
+    <!-- row 5 -->
+    <rect x="382" y="528" width="34" height="34" rx="8" fill="#e4b95c"/><path d="M390 540h18v13h-18zM393 536h12v4" fill="none" stroke="#fff" stroke-width="2" stroke-linejoin="round"/>
+    <g font-family="-apple-system,BlinkMacSystemFont,Arial,sans-serif" font-size="14" fill="#475762"><text x="427" y="550">TablePlus</text><text x="776" y="550">Applications</text><text x="955" y="550">6.4.8</text><text x="1081" y="550">App bundle</text></g><path d="M368 572h1100" stroke="#e7eaed"/>
+    <!-- row 6 -->
+    <rect x="382" y="582" width="34" height="34" rx="8" fill="#7892aa"/><path d="M391 592h16v16h-16zM394 589h10" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round"/>
+    <g font-family="-apple-system,BlinkMacSystemFont,Arial,sans-serif" font-size="14" fill="#475762"><text x="427" y="604">node</text><text x="776" y="604">npm</text><text x="955" y="604">22.11.0</text><text x="1081" y="604">Command line</text></g><path d="M368 626h1100" stroke="#e7eaed"/>
+    <rect x="382" y="636" width="34" height="34" rx="8" fill="#d27876"/><path d="M392 646h14v15h-14zM395 642h8" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round"/>
+    <g font-family="-apple-system,BlinkMacSystemFont,Arial,sans-serif" font-size="14" fill="#475762"><text x="427" y="658">Notebox</text><text x="776" y="658">Applications</text><text x="955" y="658">1.2.0</text><text x="1081" y="658">App bundle</text></g><path d="M368 680h1100" stroke="#e7eaed"/>
+    <text x="383" y="721" font-family="-apple-system,BlinkMacSystemFont,Arial,sans-serif" font-size="13" fill="#84919a">Select an installation to inspect its source, scope, and available actions.</text>
+    <!-- inspector -->
+    <path d="M1186 169v664" stroke="#dce2e6" stroke-width="2"/>
+    <rect x="1187" y="169" width="312" height="664" fill="#fafbfc"/>
+    <text x="1212" y="207" font-family="-apple-system,BlinkMacSystemFont,Arial,sans-serif" font-size="13" fill="#687782" font-weight="600">DETAILS</text>
+    <rect x="1212" y="228" width="58" height="58" rx="14" fill="#e87e54"/>
+    <path d="M1224 274v-23l17-11 17 11v23h-34z" fill="#fff"/><path d="M1235 274v-13h13v13" fill="none" stroke="#e87e54" stroke-width="2"/>
+    <text x="1284" y="252" font-family="-apple-system,BlinkMacSystemFont,Arial,sans-serif" font-size="18" fill="#293945" font-weight="700">Dockside</text>
+    <text x="1284" y="275" font-family="-apple-system,BlinkMacSystemFont,Arial,sans-serif" font-size="13" fill="#7b8790">Version 1.8.0</text>
+    <path d="M1212 306h250" stroke="#e2e6e9"/>
+    <g font-family="-apple-system,BlinkMacSystemFont,Arial,sans-serif" font-size="13">
+      <text x="1212" y="338" fill="#7d8992">Kind</text><text x="1462" y="338" text-anchor="end" fill="#394b57">Application</text>
+      <text x="1212" y="370" fill="#7d8992">Source</text><text x="1462" y="370" text-anchor="end" fill="#394b57">Homebrew cask</text>
+      <text x="1212" y="402" fill="#7d8992">Scope</text><text x="1462" y="402" text-anchor="end" fill="#394b57">/opt/homebrew</text>
+      <text x="1212" y="434" fill="#7d8992">Ownership</text><text x="1462" y="434" text-anchor="end" fill="#4c8b68">Verified</text>
+    </g>
+    <path d="M1212 456h250" stroke="#e2e6e9"/>
+    <text x="1212" y="486" font-family="-apple-system,BlinkMacSystemFont,Arial,sans-serif" font-size="12" fill="#7d8992" font-weight="700" letter-spacing=".7">AVAILABLE ACTIONS</text>
+    <rect x="1212" y="504" width="250" height="38" rx="8" fill="#f0f3f5"/>
+    <text x="1230" y="529" font-family="-apple-system,BlinkMacSystemFont,Arial,sans-serif" font-size="13" fill="#485966">How to Remove…</text>
+    <rect x="1212" y="551" width="250" height="38" rx="8" fill="#fff" stroke="#d6dde2"/>
+    <text x="1250" y="576" font-family="-apple-system,BlinkMacSystemFont,Arial,sans-serif" font-size="13" fill="#b2554c">Review Removal…</text>
+    <path d="M1226 564h13m-10-4h7m-7 8h7" stroke="#b2554c" stroke-width="1.5" stroke-linecap="round"/>
+    <rect x="1212" y="610" width="250" height="93" rx="9" fill="#f2f5f6"/>
+    <text x="1228" y="635" font-family="-apple-system,BlinkMacSystemFont,Arial,sans-serif" font-size="12" fill="#596c78" font-weight="600">Reviewed before execution</text>
+    <text x="1228" y="658" font-family="-apple-system,BlinkMacSystemFont,Arial,sans-serif" font-size="12" fill="#7b8790">Confirm the exact target and</text>
+    <text x="1228" y="677" font-family="-apple-system,BlinkMacSystemFont,Arial,sans-serif" font-size="12" fill="#7b8790">scope before a supported action.</text>
+  </g>
+  <text x="800" y="882" text-anchor="middle" font-family="-apple-system,BlinkMacSystemFont,Arial,sans-serif" font-size="13" fill="#73828c" letter-spacing=".5">INTERFACE ILLUSTRATION · CONCEPTUAL, NOT A SCREENSHOT</text>
+</svg>
