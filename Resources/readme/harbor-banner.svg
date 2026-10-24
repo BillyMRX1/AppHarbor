@@ -3,23 +3,38 @@
   <desc id="desc">AppHarbor organizes supported Mac applications and package manager installs in one local library.</desc>
   <defs>
     <linearGradient id="sea" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#153b55"/><stop offset=".58" stop-color="#245a72"/><stop offset="1" stop-color="#367d89"/></linearGradient>
-    <linearGradient id="water" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#71bac5"/><stop offset="1" stop-color="#3d8e9c"/></linearGradient>
+    <linearGradient id="bannerIconSea" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#28587B"/><stop offset="0.55" stop-color="#153B59"/><stop offset="1" stop-color="#0A2942"/>
+    </linearGradient>
+    <linearGradient id="bannerIconWater" x1="0" y1="0" x2="0.9" y2="1">
+      <stop offset="0" stop-color="#3B8DA8"/><stop offset="1" stop-color="#23647E"/>
+    </linearGradient>
+    <clipPath id="bannerIconClip" clipPathUnits="userSpaceOnUse"><rect x="112" y="92" width="206" height="206" rx="48"/></clipPath>
     <linearGradient id="glow" x1="0" y1="0" x2="1" y2="0"><stop stop-color="#91d4d2" stop-opacity=".2"/><stop offset="1" stop-color="#91d4d2" stop-opacity="0"/></linearGradient>
   </defs>
   <rect width="1600" height="390" rx="24" fill="url(#sea)"/>
   <path d="M-35 294C214 173 360 196 555 260s326 83 514 26c182-55 311-145 566-149v253H-35z" fill="url(#glow)"/>
   <path d="M-10 318c226-101 386-112 577-46 181 63 318 68 508 4 203-67 366-107 544-51" fill="none" stroke="#8dcdd0" stroke-opacity=".3" stroke-width="2"/>
   <path d="M-4 344c220-88 398-90 575-30 184 62 332 59 519-2 185-60 351-85 514-35" fill="none" stroke="#a0d7d7" stroke-opacity=".16" stroke-width="2"/>
-  <!-- Harbor mark, redrawn from the project's existing icon motif for the banner. -->
-  <g transform="translate(112 92)">
-    <rect width="206" height="206" rx="48" fill="#0d2d43" stroke="#83bdc6" stroke-opacity=".34" stroke-width="2"/>
-    <path d="M46 139c29 26 83 32 119 10 17-10 30-26 36-44 5-13 6-25 4-36-16 14-28 27-42 39-25 22-57 28-91 10z" fill="url(#water)"/>
-    <path d="M87 77c15 18 31 34 45 49 10 10 21 20 32 26" fill="none" stroke="#9ed2d5" stroke-width="5" stroke-linecap="round" opacity=".8"/>
-    <path d="M39 147c31 35 96 40 140 1 38-34 37-81 3-102l-10 16c25 16 27 48 4 69-33 29-82 29-112 3z" fill="#f0f2e9"/>
-    <path d="M66 91h94l-15 19c-3 4-7 6-12 6h-39c-7 0-13-4-15-10z" fill="#f0f2e9"/>
-    <path d="M92 91V80h29l12 11z" fill="#b8dce4"/><path d="M99 82h9v6h-9zm13 0h8v6h-8z" fill="#153b59"/>
-    <path d="M147 50h12l-2 13h-8zM145 50h16l-3-4h-10z" fill="#f0f2e9"/><circle cx="153" cy="40" r="4" fill="#f1b95b"/>
+  <!-- Canonical Resources/AppHarborIcon.svg artwork, scaled into the banner's rounded icon slot. -->
+  <g clip-path="url(#bannerIconClip)">
+   <g transform="translate(112 92) scale(0.201171875)">
+    <rect width="1024" height="1024" fill="url(#bannerIconSea)"/>
+    <path d="M222 663 C329 750 502 772 641 712 C703 685 750 636 779 582 C802 538 813 490 807 446 C745 498 695 553 638 603 C541 689 397 710 281 635 Z" fill="url(#bannerIconWater)"/>
+    <path d="M385 372 C432 427 486 479 535 531 C571 569 605 598 641 618" fill="none" stroke="#73B9C8" stroke-width="17" stroke-linecap="round" opacity="0.82"/>
+    <path d="M190 694 C321 832 596 842 782 660 C942 503 888 331 741 245 L704 308 C825 379 858 504 762 609 C622 762 370 752 241 625 Z" fill="#F0F2E9"/>
+    <g>
+      <path d="M274 420 L698 420 L637 500 C625 518 605 528 580 528 L360 528 C327 528 300 510 289 484 Z" fill="#F0F2E9"/>
+      <path d="M390 420 L390 372 C390 363 398 356 407 356 L525 356 L574 420 Z" fill="#B8DCE4"/>
+      <path d="M417 380 L451 380 L451 405 L417 405 Z M466 380 L501 380 L501 405 L466 405 Z" fill="#153B59"/>
+    </g>
+    <path d="M715 240 L761 240 L754 286 L722 286 Z" fill="#F0F2E9"/>
+    <path d="M708 241 L768 241 L757 226 L719 226 Z" fill="#F0F2E9"/>
+    <circle cx="738" cy="213" r="13" fill="#F1B95B"/>
+    <path d="M738 192 L738 183 M714 205 L707 201 M762 205 L769 201" fill="none" stroke="#F1B95B" stroke-width="7" stroke-linecap="round"/>
+   </g>
   </g>
+  <rect x="112" y="92" width="206" height="206" rx="48" fill="none" stroke="#83bdc6" stroke-opacity=".34" stroke-width="2"/>
   <text x="365" y="172" font-family="-apple-system,BlinkMacSystemFont,Arial,sans-serif" font-size="71" fill="#f7f8f6" font-weight="700" letter-spacing="-2">AppHarbor</text>
   <text x="370" y="220" font-family="-apple-system,BlinkMacSystemFont,Arial,sans-serif" font-size="24" fill="#c6dfe1" letter-spacing=".25">A clear view of what’s installed on your Mac.</text>
   <rect x="370" y="253" width="113" height="36" rx="18" fill="#d8ece7" fill-opacity=".13" stroke="#b4d7d7" stroke-opacity=".38"/>
