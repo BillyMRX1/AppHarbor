@@ -83,6 +83,55 @@ final class MCPReviewTests: XCTestCase {
         XCTAssertEqual(afterReplay, 1)
     }
 
+    func testNativeTrashRequestRequiresReviewAndReplayDoesNotMoveTwice() async throws {
+        let fixture = try await makeNativeTrashFixture()
+        defer { if let appRoot = fixture.appRoot { try? FileManager.default.removeItem(at: appRoot) } }
+        let declinedID = UUID().uuidString.lowercased()
+        let declinedRequest = removalRequest(requestID: declinedID, installation: fixture.installation)
+        _ = await fixture.model.handleMCPRequest(declinedRequest)
+        try await waitForReview(fixture.model)
+        guard case let .ready(declinedPlan)? = fixture.model.planDecision,
+              case let .appBundleTrash(target) = declinedPlan.execution else {
+            throw TestError.noReviewPlan
+        }
+        XCTAssertEqual(target.appPath, fixture.installation.canonicalLocation)
+        XCTAssertNil(declinedPlan.command)
+        XCTAssertEqual(fixture.trashExecutor.callCount, 0)
+
+        fixture.model.planDecisionSheetDidPresent()
+        fixture.model.planDecision = nil
+        fixture.model.planDecisionSheetDidDismiss()
+        XCTAssertEqual(fixture.trashExecutor.callCount, 0, "Closing the human review must not move the app.")
+
+        let approvedID = UUID().uuidString.lowercased()
+        let approvedRequest = removalRequest(requestID: approvedID, installation: fixture.installation)
+        _ = await fixture.model.handleMCPRequest(approvedRequest)
+        try await waitForReview(fixture.model)
+        guard case let .ready(approvedPlan)? = fixture.model.planDecision,
+              case .appBundleTrash = approvedPlan.execution else { throw TestError.noReviewPlan }
+        await fixture.model.execute(approvedPlan)
+        XCTAssertEqual(fixture.trashExecutor.callCount, 1)
+
+        let replay = await fixture.model.handleMCPRequest(approvedRequest)
+        XCTAssertEqual(try json(replay)["status"] as? String, "succeeded")
+        XCTAssertEqual(fixture.trashExecutor.callCount, 1, "Replaying a confirmed request must not repeat the Trash operation.")
+    }
+
+    func testProtectedAppBundleRemovalGuideKeepsBlockedDecision() async throws {
+        let fixture = try await makeNativeTrashFixture(protected: true)
+        defer { if let appRoot = fixture.appRoot { try? FileManager.default.removeItem(at: appRoot) } }
+
+        XCTAssertFalse(fixture.model.nativeTrashRemovalAvailable(for: fixture.installation))
+        await fixture.model.openRemovalGuide(for: fixture.installation)
+
+        guard case let .blocked(reason)? = fixture.model.planDecision else {
+            XCTFail("Protected app bundles must keep the core engine's blocked decision.")
+            return
+        }
+        XCTAssertTrue(reason.localizedCaseInsensitiveContains("protected"))
+        XCTAssertEqual(fixture.trashExecutor.callCount, 0)
+    }
+
     func testExpiredReviewCannotExecuteCapturedPlan() async throws {
         let fixture = try await makeFixture()
         let plan = try await prepareRemoval(in: fixture)
@@ -269,6 +318,8 @@ final class MCPReviewTests: XCTestCase {
         let model: LibraryModel
         let installation: Installation
         let runner: FakeRunner
+        let trashExecutor: FakeTrashExecutor
+        var appRoot: URL? = nil
     }
 
     private func makeFixture(enableBridge: Bool = true, allowActions: Bool = true, guidanceOnly: Bool = false) async throws -> Fixture {
@@ -286,8 +337,9 @@ final class MCPReviewTests: XCTestCase {
         let store = InMemoryInstallationStore()
         await store.saveSnapshot(snapshot)
         let runner = FakeRunner()
+        let trashExecutor = FakeTrashExecutor()
         let adapter = FakeAdapter(manager: manager, installation: installation, guidanceOnly: guidanceOnly)
-        let engine = AppHarborCoreEngine(adapters: [adapter], runner: runner, store: store)
+        let engine = AppHarborCoreEngine(adapters: [adapter], runner: runner, appTrashExecutor: trashExecutor, store: store)
         _ = await engine.refresh()
         let defaults = UserDefaults(suiteName: "AppHarbor-MCPReviewTests-\(UUID().uuidString)")!
         defaults.set(enableBridge, forKey: "AppHarbor.mcpBridgeEnabled")
@@ -298,7 +350,53 @@ final class MCPReviewTests: XCTestCase {
         try await waitForSnapshot(model)
         XCTAssertEqual(model.mcpBridgeEnabled, enableBridge)
         XCTAssertEqual(model.mcpActionRequestsEnabled, allowActions)
-        return Fixture(model: model, installation: installation, runner: runner)
+        return Fixture(model: model, installation: installation, runner: runner, trashExecutor: trashExecutor)
+    }
+
+    private func makeNativeTrashFixture(protected: Bool = false) async throws -> Fixture {
+        let appRoot = URL(fileURLWithPath: "/private/tmp", isDirectory: true)
+            .appendingPathComponent("AppHarbor-NativeTrash-\(UUID().uuidString)", isDirectory: true)
+        let appURL = appRoot.appendingPathComponent("OrdinaryApp.app", isDirectory: true)
+        let contents = appURL.appendingPathComponent("Contents", isDirectory: true)
+        try FileManager.default.createDirectory(at: contents, withIntermediateDirectories: true)
+        let bundleIdentifier = "test.example.ordinaryapp"
+        let info = ["CFBundleIdentifier": bundleIdentifier,
+                    "CFBundlePackageType": "APPL",
+                    "CFBundleExecutable": "OrdinaryApp",
+                    "CFBundleVersion": "1"]
+        let plist = try PropertyListSerialization.data(fromPropertyList: info, format: .xml, options: 0)
+        try plist.write(to: contents.appendingPathComponent("Info.plist"))
+        let target = try XCTUnwrap(AppBundleTrashTarget.capture(path: appURL.path, scopeRoot: appRoot.path, bundleIdentifier: bundleIdentifier))
+
+        let manager = ManagerInstance(id: "test-app-bundles", kind: .appBundle,
+                                      executablePath: "", executableFingerprint: "native-app-trash",
+                                      scope: ManagerScope(id: "test-folder", displayName: "Test Applications", canonicalRoot: appRoot.path),
+                                      removalSupported: true)
+        let identity = InstallationID(managerID: manager.id, scopeID: manager.scope.id,
+                                      nativeID: bundleIdentifier, canonicalLocation: appURL.path)
+        let installation = Installation(identity: identity, kind: .appBundle, displayName: "OrdinaryApp", version: "1",
+                                         canonicalLocation: appURL.path, bundleIdentifier: bundleIdentifier,
+                                         ownership: .verified, isProtected: protected,
+                                         protectionReason: protected ? "This protected app cannot be moved to Trash." : nil,
+                                         removalSupported: true, isStale: false)
+        let snapshot = InventorySnapshot(installations: [installation], managers: [manager],
+                                         coverage: [CoverageSnapshot(id: manager.id, sourceName: "Applications", scopeID: manager.scope.id,
+                                                                     state: .complete, itemCount: 1)])
+        let store = InMemoryInstallationStore()
+        await store.saveSnapshot(snapshot)
+        let runner = FakeRunner()
+        let trashExecutor = FakeTrashExecutor()
+        let adapter = FakeAdapter(manager: manager, installation: installation, guidanceOnly: false, trashTarget: target)
+        let engine = AppHarborCoreEngine(adapters: [adapter], runner: runner, appTrashExecutor: trashExecutor, store: store)
+        _ = await engine.refresh()
+        let defaults = UserDefaults(suiteName: "AppHarbor-NativeTrashTests-\(UUID().uuidString)")!
+        defaults.set(true, forKey: "AppHarbor.mcpBridgeEnabled")
+        defaults.set(true, forKey: "AppHarbor.mcpActionRequestsEnabled")
+        let socketURL = FileManager.default.temporaryDirectory.appendingPathComponent("ah-\(UUID().uuidString).sock")
+        let model = LibraryModel(engine: engine, store: store, preferences: defaults,
+                                 mcpServer: MCPBridgeServer(socketURL: socketURL), mcpReviewTTL: 300)
+        try await waitForSnapshot(model)
+        return Fixture(model: model, installation: installation, runner: runner, trashExecutor: trashExecutor, appRoot: appRoot)
     }
 
     private func prepareRemoval(in fixture: Fixture) async throws -> ActionPlan {
@@ -358,11 +456,25 @@ private actor FakeRunner: ProcessRunning {
     }
 }
 
+private final class FakeTrashExecutor: NativeAppTrashExecuting, @unchecked Sendable {
+    private let lock = NSLock()
+    private var calls = 0
+    var callCount: Int {
+        lock.lock(); defer { lock.unlock() }
+        return calls
+    }
+    func trash(_ target: AppBundleTrashTarget) throws -> NativeAppTrashResult {
+        lock.lock(); calls += 1; lock.unlock()
+        return NativeAppTrashResult(originalPathIsAbsent: true, trashedPath: "/test/Trash/OrdinaryApp.app", hasExpectedIdentity: true)
+    }
+}
+
 private struct FakeAdapter: PackageManagerAdapter {
     let manager: ManagerInstance
     let installation: Installation
     let guidanceOnly: Bool
-    var kind: ManagerKind { .homebrew }
+    var trashTarget: AppBundleTrashTarget? = nil
+    var kind: ManagerKind { manager.kind }
 
     func detect(using runner: any ProcessRunning) async -> DetectionResult {
         DetectionResult(presence: .present, instances: [manager])
@@ -375,6 +487,12 @@ private struct FakeAdapter: PackageManagerAdapter {
     }
 
     func prepare(operation: ManagedOperation, installation: Installation, using runner: any ProcessRunning) async -> PlanDecision {
+        if let trashTarget {
+            return .ready(ActionPlan(installationID: self.installation.identity, operation: operation,
+                                     managerInstanceID: manager.id, trashTarget: trashTarget,
+                                     knownEffects: ["Moves only the app bundle to Finder Trash."],
+                                     expectedResult: "The app is in Trash and absent from its original location."))
+        }
         if guidanceOnly {
             return .guidance(RemovalGuidance(title: "Manual source review", steps: ["Use the source directly."], isVerified: false),
                              reason: "This test item is guidance only.")
@@ -386,7 +504,10 @@ private struct FakeAdapter: PackageManagerAdapter {
     }
 
     func revalidate(plan: ActionPlan, installation: Installation, using runner: any ProcessRunning) async -> PreflightResult {
-        .valid(currentTargetFingerprint: "target-fingerprint", currentExecutableFingerprint: manager.executableFingerprint)
+        if case let .appBundleTrash(target) = plan.execution {
+            return .valid(currentTargetFingerprint: target.metadataFingerprint, currentExecutableFingerprint: "native-app-trash")
+        }
+        return .valid(currentTargetFingerprint: "target-fingerprint", currentExecutableFingerprint: manager.executableFingerprint)
     }
 
     func verify(plan: ActionPlan, installation: Installation, using runner: any ProcessRunning) async -> VerificationResult {

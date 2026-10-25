@@ -35,8 +35,8 @@ final class NPMDisposableLifecycleTests: XCTestCase {
         XCTAssertEqual(inventory.installations.count, 1)
         guard case let .ready(plan) = await adapter.prepare(operation: .remove, installation: installation, using: runner) else { return XCTFail("Expected direct removal for the disposable local package") }
         guard case .valid = await adapter.revalidate(plan: plan, installation: installation, using: runner) else { return XCTFail("Disposable package failed fresh preflight") }
-        XCTAssertTrue(plan.command.arguments.contains("--ignore-scripts"))
-        let removal = try await runner.run(plan.command)
+        XCTAssertTrue(plan.command!.arguments.contains("--ignore-scripts"))
+        let removal = try await runner.run(plan.command!)
         XCTAssertEqual(removal.exitCode, 0, "Temporary fixture removal failed: \(removal.standardError)")
         let verification = await adapter.verify(plan: plan, installation: installation, using: runner)
         if verification != .verifiedRemoved {

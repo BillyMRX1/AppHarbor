@@ -78,19 +78,32 @@ public struct ProcessCommand: Codable, Hashable, Sendable {
         self.timeout = timeout; self.maximumOutputBytes = maximumOutputBytes
     }
 }
+public enum ActionExecution: Codable, Sendable {
+    case process(ProcessCommand)
+    case appBundleTrash(AppBundleTrashTarget)
+}
 public struct ActionPlan: Codable, Sendable, Identifiable {
     public var id: UUID; public var installationID: InstallationID; public var operation: ManagedOperation; public var managerInstanceID: String
-    public var command: ProcessCommand; public var executableFingerprint: String; public var targetFingerprint: String; public var previewCommand: String
+    public var execution: ActionExecution; public var executableFingerprint: String; public var targetFingerprint: String; public var previewCommand: String
     public var knownEffects: [String]; public var unknownEffects: [String]; public var expectedResult: String; public var privilegeRequired: Bool
     public var approvedUpdateVersion: String?; public var approvedSourcePolicy: String?
     public var createdAt: Date; public var expiresAt: Date
     public init(id: UUID = UUID(), installationID: InstallationID, operation: ManagedOperation, managerInstanceID: String, command: ProcessCommand, executableFingerprint: String, targetFingerprint: String, previewCommand: String, knownEffects: [String] = [], unknownEffects: [String] = [], expectedResult: String, privilegeRequired: Bool = false, approvedUpdateVersion: String? = nil, approvedSourcePolicy: String? = nil, createdAt: Date = .now, expiresAt: Date = .now.addingTimeInterval(300)) {
-        self.id = id; self.installationID = installationID; self.operation = operation; self.managerInstanceID = managerInstanceID; self.command = command
+        self.id = id; self.installationID = installationID; self.operation = operation; self.managerInstanceID = managerInstanceID; self.execution = .process(command)
         self.executableFingerprint = executableFingerprint; self.targetFingerprint = targetFingerprint; self.previewCommand = previewCommand
         self.knownEffects = knownEffects; self.unknownEffects = unknownEffects; self.expectedResult = expectedResult; self.privilegeRequired = privilegeRequired
         self.approvedUpdateVersion = approvedUpdateVersion; self.approvedSourcePolicy = approvedSourcePolicy
         self.createdAt = createdAt; self.expiresAt = expiresAt
     }
+    public init(id: UUID = UUID(), installationID: InstallationID, operation: ManagedOperation, managerInstanceID: String, trashTarget: AppBundleTrashTarget, executableFingerprint: String = "native-app-trash", targetFingerprint: String? = nil, previewCommand: String = "Move the selected app to Trash", knownEffects: [String] = [], unknownEffects: [String] = [], expectedResult: String = "The app is in Trash and absent from its original location.", privilegeRequired: Bool = false, approvedUpdateVersion: String? = nil, approvedSourcePolicy: String? = nil, createdAt: Date = .now, expiresAt: Date = .now.addingTimeInterval(300)) {
+        self.id = id; self.installationID = installationID; self.operation = operation; self.managerInstanceID = managerInstanceID; self.execution = .appBundleTrash(trashTarget)
+        self.executableFingerprint = executableFingerprint; self.targetFingerprint = targetFingerprint ?? trashTarget.metadataFingerprint; self.previewCommand = previewCommand
+        self.knownEffects = knownEffects; self.unknownEffects = unknownEffects; self.expectedResult = expectedResult; self.privilegeRequired = privilegeRequired
+        self.approvedUpdateVersion = approvedUpdateVersion; self.approvedSourcePolicy = approvedSourcePolicy
+        self.createdAt = createdAt; self.expiresAt = expiresAt
+    }
+    /// Compatibility accessor for existing process-backed adapters. Native plans have no command.
+    public var command: ProcessCommand? { if case let .process(command) = execution { return command }; return nil }
 }
 public struct RemovalGuidance: Codable, Sendable {
     public var title: String; public var steps: [String]; public var displayCommand: String?; public var sourceURL: URL?; public var isVerified: Bool

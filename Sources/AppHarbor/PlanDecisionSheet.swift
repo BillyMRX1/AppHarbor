@@ -58,11 +58,11 @@ struct PlanDecisionSheet: View {
                         .focused($cancelFocused)
                 }
                 if mode == .review, case let .ready(plan) = decision, !isExecuting {
-                    Button(plan.operation == .remove ? "Confirm Removal" : "Confirm Update", role: plan.operation == .remove ? .destructive : nil) {
+                    Button(confirmTitle(for: plan), role: plan.operation == .remove ? .destructive : nil) {
                         onConfirm(plan)
                     }
                     // Deliberately no Return/default shortcut for a destructive action.
-                    .accessibilityHint("Runs the reviewed operation for this exact installation.")
+                    .accessibilityHint(isNativeTrash(plan) ? "Moves this exact app bundle to Finder Trash." : "Runs the reviewed operation for this exact installation.")
                 }
             }
             .padding(16)
@@ -73,34 +73,48 @@ struct PlanDecisionSheet: View {
     }
 
     @ViewBuilder private func review(_ plan: ActionPlan) -> some View {
-        Label(plan.operation == .remove ? "Review Removal" : "Review Update", systemImage: plan.operation == .remove ? "trash" : "arrow.down.circle")
+        Label(reviewTitle(for: plan), systemImage: plan.operation == .remove ? "trash" : "arrow.down.circle")
             .font(.title2.weight(.semibold))
-        Text("AppHarbor will re-check the target and manager immediately before starting.")
+        Text(isNativeTrash(plan)
+             ? "AppHarbor will re-check this app bundle immediately before moving it to Finder Trash."
+             : "AppHarbor will re-check the target and manager immediately before starting.")
             .font(.callout).foregroundStyle(.secondary)
         GroupBox("Exact target") {
             VStack(alignment: .leading, spacing: 5) {
                 Text(plan.installationID.nativeID).font(.headline)
-                Text("Location: \(plan.installationID.canonicalLocation)")
+                Text("Location: \(targetPath(for: plan))")
                 Text("Scope: \(plan.installationID.scopeID)")
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .textSelection(.enabled)
         }
-        GroupBox("Command") {
-            HStack(alignment: .top, spacing: 10) {
-                Text(reviewCommand(plan))
-                    .font(.system(.callout, design: .monospaced))
-                    .textSelection(.enabled)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                Button {
-                    NSPasteboard.general.clearContents()
-                    NSPasteboard.general.setString(reviewCommand(plan), forType: .string)
-                } label: { Label("Copy Command", systemImage: "doc.on.doc") }
-                    .labelStyle(.iconOnly)
-                    .help("Copy complete command to clipboard")
-                    .accessibilityLabel("Copy Command")
+        if case .appBundleTrash = plan.execution {
+            GroupBox("Move to Trash") {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Only this app bundle moves to Finder Trash; installer or package-manager records may remain.")
+                    Text("Support files, settings, documents, and subscriptions may remain. Use the developer’s uninstaller when required.")
+                        .foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .textSelection(.enabled)
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
+        } else if case .process = plan.execution {
+            GroupBox("Command") {
+                HStack(alignment: .top, spacing: 10) {
+                    Text(plan.previewCommand)
+                        .font(.system(.callout, design: .monospaced))
+                        .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    Button {
+                        NSPasteboard.general.clearContents()
+                        NSPasteboard.general.setString(plan.previewCommand, forType: .string)
+                    } label: { Label("Copy Command", systemImage: "doc.on.doc") }
+                        .labelStyle(.iconOnly)
+                        .help("Copy complete command to clipboard")
+                        .accessibilityLabel("Copy Command")
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
         }
         if !plan.knownEffects.isEmpty || !plan.unknownEffects.isEmpty {
             GroupBox("Effects") {
@@ -111,8 +125,13 @@ struct PlanDecisionSheet: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
-        Text("AppHarbor cannot undo this operation.")
-            .font(.callout.weight(.medium))
+        if isNativeTrash(plan) {
+            Text("You can restore the app from Finder Trash until Trash is emptied. AppHarbor does not provide an Undo command.")
+                .font(.callout.weight(.medium))
+        } else {
+            Text("AppHarbor cannot undo this operation.")
+                .font(.callout.weight(.medium))
+        }
         Text(plan.expectedResult).font(.callout).foregroundStyle(.secondary)
         if plan.privilegeRequired {
             Label("This plan requires elevated permission and cannot be run by AppHarbor.", systemImage: "lock")
@@ -150,8 +169,22 @@ struct PlanDecisionSheet: View {
     }
 }
 
-private func reviewCommand(_ plan: ActionPlan) -> String {
-    plan.previewCommand
+private func isNativeTrash(_ plan: ActionPlan) -> Bool {
+    if case .appBundleTrash = plan.execution { return true }
+    return false
+}
+
+private func targetPath(for plan: ActionPlan) -> String {
+    if case let .appBundleTrash(target) = plan.execution { return target.appPath }
+    return plan.installationID.canonicalLocation
+}
+
+private func reviewTitle(for plan: ActionPlan) -> String {
+    isNativeTrash(plan) ? "Review Move to Trash" : (plan.operation == .remove ? "Review Removal" : "Review Update")
+}
+
+private func confirmTitle(for plan: ActionPlan) -> String {
+    isNativeTrash(plan) ? "Move to Trash" : (plan.operation == .remove ? "Confirm Removal" : "Confirm Update")
 }
 
 extension PlanDecision: Identifiable {

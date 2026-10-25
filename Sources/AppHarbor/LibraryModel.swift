@@ -82,7 +82,7 @@ final class LibraryModel {
     }
     var mcpBridgeStatus = "Off"
     var mcpLatestRequestStatus = "No requests yet"
-    var mcpReviewContext: String? { activeMCPReview.map { "Requested by a connected AI client for \($0.displayName). Review this exact target and command yourself in AppHarbor." } }
+    var mcpReviewContext: String? { activeMCPReview.map { "Requested by a connected AI client for \($0.displayName). Review this exact target and action yourself in AppHarbor." } }
 
     @ObservationIgnored var engine: AppHarborCoreEngine?
     @ObservationIgnored private var eventTask: Task<Void, Never>?
@@ -189,6 +189,23 @@ final class LibraryModel {
         return visibleInstallations.first { $0.identity == id }
     }
 
+    func usesNativeTrash(for installation: Installation) -> Bool {
+        installation.kind == .appBundle && managers.first { $0.id == installation.identity.managerID }?.kind == .appBundle
+    }
+
+    func nativeTrashRemovalAvailable(for installation: Installation) -> Bool {
+        guard usesNativeTrash(for: installation), installation.removalSupported, !installation.isProtected,
+              installation.ownership == .verified, !installation.isStale,
+              let manager = managers.first(where: { $0.id == installation.identity.managerID }) else { return false }
+        return manager.removalSupported && manager.presence == .present
+    }
+
+    func removalReviewAvailable(for installation: Installation) -> Bool {
+        guard canChangeConfiguration, installation.removalSupported, !installation.isProtected,
+              installation.ownership == .verified, !installation.isStale else { return false }
+        return !usesNativeTrash(for: installation) || nativeTrashRemovalAvailable(for: installation)
+    }
+
     func pruneSelection(to visibleIDs: Set<InstallationID>? = nil) {
         let allowed = visibleIDs ?? Set(visibleInstallations.map(\.identity))
         selection.formIntersection(allowed)
@@ -252,13 +269,23 @@ final class LibraryModel {
         let decision = await engine.prepare(operation: .remove, installationID: installation.identity)
         switch decision {
         case .ready(let plan):
-            let manager = managers.first { $0.id == installation.identity.managerID }
-            let guide = RemovalGuidance(title: "Remove \(installation.displayName) manually", steps: [
-                "This installation is managed by \(manager.map { sourceName($0.kind) } ?? "its package manager") in \(manager?.scope.displayName ?? installation.identity.scopeID).",
-                "If you choose to continue, run the copied command yourself in Terminal. AppHarbor will only copy it; this guide does not execute it.",
-                "Return to AppHarbor and refresh to check this same installation."
-            ], displayCommand: plan.previewCommand, isVerified: true)
-            planDecision = .guidance(guide, reason: "This copy-only command was prepared for the selected installation and its explicit scope.")
+            switch plan.execution {
+            case .appBundleTrash:
+                let guide = RemovalGuidance(title: "Move \(installation.displayName) to Finder Trash", steps: [
+                    "Choose Move to Trash… to review and confirm this exact app bundle.",
+                    "Only this app bundle moves. Installer records and support files may remain; use the developer’s uninstaller when required.",
+                    "You can restore the app from Finder Trash until Trash is emptied."
+                ], isVerified: true)
+                planDecision = .guidance(guide, reason: "AppHarbor prepared a verified Finder Trash action for this app bundle; it does not run a removal command.")
+            case .process:
+                let manager = managers.first { $0.id == installation.identity.managerID }
+                let guide = RemovalGuidance(title: "Remove \(installation.displayName) manually", steps: [
+                    "This installation is managed by \(manager.map { sourceName($0.kind) } ?? "its package manager") in \(manager?.scope.displayName ?? installation.identity.scopeID).",
+                    "If you choose to continue, run the copied command yourself in Terminal. AppHarbor will only copy it; this guide does not execute it.",
+                    "Return to AppHarbor and refresh to check this same installation."
+                ], displayCommand: plan.previewCommand, isVerified: true)
+                planDecision = .guidance(guide, reason: "This copy-only command was prepared for the selected installation and its explicit scope.")
+            }
         case .guidance(let guide, let reason): planDecision = .guidance(guide, reason: reason)
         case .blocked(let reason): planDecision = .blocked(reason: reason)
         }

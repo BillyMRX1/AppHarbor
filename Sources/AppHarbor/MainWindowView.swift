@@ -249,8 +249,8 @@ struct LibraryView: View {
     Group {
         Button("How to Remove…") { Task { await model.openRemovalGuide(for: item) } }
             .disabled(model.isExecutingOperation || model.isPreparingPlan || model.planDecision != nil)
-        Button("Remove…", role: .destructive) { Task { await model.prepare(.remove, for: item) } }
-            .disabled(!model.canChangeConfiguration || !item.removalSupported || item.isProtected || item.ownership != .verified || item.isStale)
+        Button(model.usesNativeTrash(for: item) ? "Move to Trash…" : "Remove…", role: .destructive) { Task { await model.prepare(.remove, for: item) } }
+            .disabled(!model.removalReviewAvailable(for: item))
     }
 }
 
@@ -411,7 +411,7 @@ struct InstallationInspector: View {
                         LabeledContent("Source", value: manager.map { sourceName($0.kind) } ?? "Unknown")
                         LabeledContent("Kind", value: kindName(item.kind))
                         Divider()
-                        Label(item.ownership == .verified ? "Matched to source" : "Ownership \(item.ownership.rawValue)", systemImage: item.ownership == .verified ? "checkmark.circle" : "questionmark.circle")
+                        Label(targetEvidenceLabel(for: item), systemImage: item.ownership == .verified ? "checkmark.circle" : "questionmark.circle")
                             .font(.callout)
                         if item.isStale {
                             Label("Stale · refresh before reviewing an action", systemImage: "clock.arrow.circlepath")
@@ -444,12 +444,16 @@ struct InstallationInspector: View {
                 }
                 Divider()
                 VStack(alignment: .leading, spacing: 9) {
-                    Button("Remove…") { Task { await model.prepare(.remove, for: item) } }
-                        .disabled(!item.removalSupported || item.isProtected || item.ownership != .verified || item.isStale)
+                    Button(model.usesNativeTrash(for: item) ? "Move to Trash…" : "Remove…", role: .destructive) { Task { await model.prepare(.remove, for: item) } }
+                        .disabled(!model.removalReviewAvailable(for: item))
                         .help(removalDisabledReason(item))
                     Button("How to Remove…") { Task { await model.openRemovalGuide(for: item) } }
                         .buttonStyle(.link)
-                    Text(item.removalSupported ? "A command preview opens first." : "Direct removal is unavailable for this installation.")
+                    Text(model.usesNativeTrash(for: item)
+                         ? (model.nativeTrashRemovalAvailable(for: item)
+                            ? "Moves only this app bundle; installer records and support files may remain. Use the developer’s uninstaller when required."
+                            : "Moving this app bundle to Trash is unavailable for the current target.")
+                         : (item.removalSupported ? "A command preview opens first." : "Direct removal is unavailable for this installation."))
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -469,6 +473,13 @@ struct InstallationInspector: View {
             Text(value).font(.system(.caption, design: .monospaced)).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
         }
     }
+}
+
+private func targetEvidenceLabel(for item: Installation) -> String {
+    if item.kind == .appBundle {
+        return item.ownership == .verified ? "Target verified" : "Target \(item.ownership.rawValue)"
+    }
+    return item.ownership == .verified ? "Matched to source" : "Ownership \(item.ownership.rawValue)"
 }
 
 struct SourcesView: View {

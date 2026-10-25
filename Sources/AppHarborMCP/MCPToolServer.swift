@@ -8,7 +8,7 @@ enum MCPToolServer {
     static func makeServer(bridgeSend: @escaping BridgeSender = { request in
         try await MCPBridgeClient.send(request)
     }) async -> MCP.Server {
-        let server = MCP.Server(name: "appharbor", version: "0.2.0", capabilities: .init(tools: .init()), configuration: .strict)
+        let server = MCP.Server(name: "appharbor", version: "0.3.0", capabilities: .init(tools: .init()), configuration: .strict)
         await server.withMethodHandler(MCP.ListTools.self) { _ in
             MCP.ListTools.Result(tools: AppHarborMCPTools.all)
         }

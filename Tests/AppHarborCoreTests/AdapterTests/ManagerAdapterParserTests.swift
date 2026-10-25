@@ -117,8 +117,8 @@ final class ManagerAdapterParserTests: XCTestCase {
     }
 
     func testAppBundleScanFindsNestedAppsProtectsAppleAndRejectsEscapingSymlinks() throws {
-        let root = FileManager.default.temporaryDirectory.appendingPathComponent("appharbor-apps-\(UUID().uuidString)", isDirectory: true)
-        let outside = FileManager.default.temporaryDirectory.appendingPathComponent("appharbor-outside-\(UUID().uuidString).app", isDirectory: true)
+        let root = URL(fileURLWithPath: "/private/tmp/appharbor-apps-\(UUID().uuidString)", isDirectory: true)
+        let outside = URL(fileURLWithPath: "/private/tmp/appharbor-outside-\(UUID().uuidString).app", isDirectory: true)
         defer { try? FileManager.default.removeItem(at: root); try? FileManager.default.removeItem(at: outside) }
         try makeBundle(root.appendingPathComponent("Utilities/Nested.app", isDirectory: true), id: "org.example.nested", display: "Nested")
         try makeBundle(root.appendingPathComponent("Apple.app", isDirectory: true), id: "com.apple.fixture", display: "Apple")
@@ -128,6 +128,100 @@ final class ManagerAdapterParserTests: XCTestCase {
         XCTAssertEqual(Set(result.installations.compactMap(\.bundleIdentifier)), ["org.example.nested", "com.apple.fixture", "org.example.outside"])
         XCTAssertTrue(result.installations.first(where: { $0.bundleIdentifier == "com.apple.fixture" })?.isProtected == true)
         XCTAssertTrue(result.installations.first(where: { $0.bundleIdentifier == "org.example.outside" })?.isProtected == true)
+    }
+
+    func testReceiptBundleGetsNativeTrashPlanAndStaleReplacementInvalidates() async throws {
+        let root = URL(fileURLWithPath: "/private/tmp/appharbor-trash-scope-\(UUID().uuidString)", isDirectory: true)
+        let app = root.appendingPathComponent("Demo.app", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try makeBundle(app, id: "org.example.demo", display: "Demo")
+        let receipt = app.appendingPathComponent("Contents/_MASReceipt/receipt")
+        try FileManager.default.createDirectory(at: receipt.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Data("receipt evidence".utf8).write(to: receipt)
+
+        let adapter = AppBundleAdapter(explicitRoots: [root.path])
+        let instance = ManagerInstance(id: "apps|\(root.path)", kind: .appBundle, executablePath: "", executableFingerprint: "native-app-trash", scope: ManagerScope(id: root.path, displayName: root.path, canonicalRoot: root.path), removalSupported: true)
+        let inventory = await adapter.inventory(instance: instance, using: StaticRunner(output: ""))
+        let installation = try XCTUnwrap(inventory.installations.first)
+        XCTAssertEqual(inventory.coverage.state, .complete)
+        XCTAssertTrue(installation.evidence.contains(where: { $0.label == "App Store receipt" }))
+        let decision = await adapter.prepare(operation: .remove, installation: installation, using: StaticRunner(output: ""))
+        guard case let .ready(plan) = decision else {
+            switch decision { case .guidance(_, let reason), .blocked(let reason): XCTFail("Expected reviewed Trash action: \(reason)"); case .ready: break }
+            return
+        }
+        guard case .appBundleTrash = plan.execution else { return XCTFail("App bundles must use the native Trash execution type") }
+        XCTAssertNil(plan.command)
+        XCTAssertTrue(plan.knownEffects.contains(where: { $0.contains("receipt remains") }))
+        guard case .valid = await adapter.revalidate(plan: plan, installation: installation, using: StaticRunner(output: "")) else { return XCTFail("The unchanged reviewed bundle should pass preflight") }
+
+        try FileManager.default.removeItem(at: app)
+        try makeBundle(app, id: "org.example.demo", display: "Demo", version: "2.0")
+        guard case .invalidated = await adapter.revalidate(plan: plan, installation: installation, using: StaticRunner(output: "")) else { return XCTFail("Replacing the app at the same path must invalidate the earlier review") }
+    }
+
+    func testUnrelatedMalformedBundleDoesNotBlockFreshReviewedTarget() async throws {
+        let root = URL(fileURLWithPath: "/private/tmp/appharbor-partial-trash-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let goodApp = root.appendingPathComponent("Good.app", isDirectory: true)
+        try makeBundle(goodApp, id: "org.example.good", display: "Good")
+        let malformed = root.appendingPathComponent("Unrelated.app/Contents", isDirectory: true)
+        try FileManager.default.createDirectory(at: malformed, withIntermediateDirectories: true)
+        try Data("not a plist".utf8).write(to: malformed.appendingPathComponent("Info.plist"))
+        let adapter = AppBundleAdapter(explicitRoots: [root.path])
+        let instance = ManagerInstance(id: "apps|\(root.path)", kind: .appBundle, executablePath: "", executableFingerprint: "native-app-trash", scope: ManagerScope(id: root.path, displayName: root.path, canonicalRoot: root.path), removalSupported: true)
+        let inventory = await adapter.inventory(instance: instance, using: StaticRunner(output: ""))
+        XCTAssertEqual(inventory.coverage.state, .partial)
+        let installation = try XCTUnwrap(inventory.installations.first(where: { $0.displayName == "Good" }))
+        guard case .ready = await adapter.prepare(operation: .remove, installation: installation, using: StaticRunner(output: "")) else { return XCTFail("A malformed unrelated bundle must not block the selected fresh target") }
+    }
+
+    func testVendorUninstallerAddedAfterReviewInvalidatesTrashPlan() async throws {
+        let root = URL(fileURLWithPath: "/private/tmp/appharbor-uninstaller-review-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let app = root.appendingPathComponent("Demo.app", isDirectory: true)
+        try makeBundle(app, id: "org.example.demo", display: "Demo")
+        let adapter = AppBundleAdapter(explicitRoots: [root.path])
+        let instance = ManagerInstance(id: "apps|\(root.path)", kind: .appBundle, executablePath: "", executableFingerprint: "native-app-trash", scope: ManagerScope(id: root.path, displayName: root.path, canonicalRoot: root.path), removalSupported: true)
+        let inventory = await adapter.inventory(instance: instance, using: StaticRunner(output: ""))
+        let installation = try XCTUnwrap(inventory.installations.first)
+        guard case let .ready(plan) = await adapter.prepare(operation: .remove, installation: installation, using: StaticRunner(output: "")) else { return XCTFail("Expected a reviewed Trash plan before an uninstaller appears") }
+
+        let uninstaller = app.appendingPathComponent("Contents/Resources/uninstall.sh")
+        try FileManager.default.createDirectory(at: uninstaller.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Data("#!/bin/sh\nexit 0\n".utf8).write(to: uninstaller)
+        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: uninstaller.path)
+        guard case .invalidated = await adapter.revalidate(plan: plan, installation: installation, using: StaticRunner(output: "")) else { return XCTFail("A newly discovered vendor uninstaller must invalidate the earlier Trash review") }
+    }
+
+    func testAppBundleTrashEligibilityRejectsSymlinksManagedAndBroadRoots() async throws {
+        let base = URL(fileURLWithPath: "/private/tmp/appharbor-trash-safety-\(UUID().uuidString)", isDirectory: true)
+        let root = base.appendingPathComponent("Applications", isDirectory: true)
+        let managed = root.appendingPathComponent("Cellar/demo/1.0/Demo.app", isDirectory: true)
+        let inRootTarget = root.appendingPathComponent("Real.app", isDirectory: true)
+        let outside = base.appendingPathComponent("Elsewhere.app", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: base) }
+        try makeBundle(managed, id: "org.example.managed", display: "Managed")
+        try makeBundle(inRootTarget, id: "org.example.inroot", display: "In Root")
+        try makeBundle(outside, id: "org.example.outside", display: "Outside")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        try FileManager.default.createSymbolicLink(at: root.appendingPathComponent("Alias.app"), withDestinationURL: outside)
+        try FileManager.default.createSymbolicLink(at: root.appendingPathComponent("InRootAlias.app"), withDestinationURL: inRootTarget)
+        let adapter = AppBundleAdapter(explicitRoots: [root.path, "/"])
+        let instance = ManagerInstance(id: "apps|\(root.path)", kind: .appBundle, executablePath: "", executableFingerprint: "native-app-trash", scope: ManagerScope(id: root.path, displayName: root.path, canonicalRoot: root.path), removalSupported: true)
+        let inventory = await adapter.inventory(instance: instance, using: StaticRunner(output: ""))
+        let symlink = try XCTUnwrap(inventory.installations.first(where: { $0.displayName == "Outside" }))
+        let managedBundle = try XCTUnwrap(inventory.installations.first(where: { $0.displayName == "Managed" }))
+        let inRootAlias = try XCTUnwrap(inventory.installations.first(where: { $0.identity.canonicalLocation.hasSuffix("/InRootAlias.app") }))
+        let inRootTargetRow = try XCTUnwrap(inventory.installations.first(where: { $0.canonicalLocation == inRootTarget.path }))
+        XCTAssertTrue(symlink.isProtected)
+        XCTAssertTrue(inRootAlias.isProtected)
+        XCTAssertFalse(inRootTargetRow.isProtected)
+        XCTAssertTrue(managedBundle.isProtected)
+        let broadDetection = await AppBundleAdapter(explicitRoots: ["/"]).detect(using: StaticRunner(output: ""))
+        XCTAssertFalse(broadDetection.instances.contains(where: { $0.scope.canonicalRoot == "/" }))
+        guard case .blocked = await adapter.prepare(operation: .remove, installation: symlink, using: StaticRunner(output: "")) else { return XCTFail("Symlinked app bundles must be blocked") }
+        guard case .blocked = await adapter.prepare(operation: .remove, installation: managedBundle, using: StaticRunner(output: "")) else { return XCTFail("Homebrew-managed app bundles must be blocked") }
     }
 
     func testCaskAppLinksRequireExactReportedPath() {
@@ -176,8 +270,8 @@ final class ManagerAdapterParserTests: XCTestCase {
         let adapter = NPMAdapter()
         let runner = StaticRunner(output: #"{"dependencies":{"shared":{"version":"1.3.0"}}}"#)
         guard case let .ready(plan) = await adapter.prepare(operation: .remove, installation: installation, using: runner) else { return XCTFail("Expected a direct npm removal plan") }
-        XCTAssertTrue(plan.command.arguments.contains("--prefix"))
-        XCTAssertEqual(plan.command.arguments[plan.command.arguments.firstIndex(of: "--prefix")! + 1], prefix)
+        XCTAssertTrue(plan.command!.arguments.contains("--prefix"))
+        XCTAssertEqual(plan.command!.arguments[plan.command!.arguments.firstIndex(of: "--prefix")! + 1], prefix)
         XCTAssertTrue(plan.previewCommand.contains("cd \(prefix) && env "))
         XCTAssertTrue(plan.previewCommand.contains("PATH="))
         if case .invalidated = await adapter.revalidate(plan: plan, installation: installation, using: runner) { } else { XCTFail("Fresh inventory with a changed version must invalidate the plan") }
@@ -219,10 +313,10 @@ final class ManagerAdapterParserTests: XCTestCase {
         let installation = Installation(identity: identity, kind: .npmPackage, displayName: "pkg", version: "1.0.0", canonicalLocation: location, ownership: .verified, evidence: [ManagerEvidence(label: "Update source", value: "public npm registry")], removalSupported: true, updateSupported: true)
         let reviewed = NPMUpdateRunner(candidate: "1.1.0")
         guard case let .ready(plan) = await NPMAdapter().prepare(operation: .update, installation: installation, using: reviewed) else { return XCTFail("Expected validated public-registry exact-version plan") }
-        XCTAssertTrue(plan.command.arguments.contains("install"))
-        XCTAssertTrue(plan.command.arguments.contains("--ignore-scripts"))
-        XCTAssertTrue(plan.command.arguments.contains("--registry"))
-        XCTAssertEqual(plan.command.arguments.last, "pkg@1.1.0")
+        XCTAssertTrue(plan.command!.arguments.contains("install"))
+        XCTAssertTrue(plan.command!.arguments.contains("--ignore-scripts"))
+        XCTAssertTrue(plan.command!.arguments.contains("--registry"))
+        XCTAssertEqual(plan.command!.arguments.last, "pkg@1.1.0")
         XCTAssertEqual(plan.approvedUpdateVersion, "1.1.0")
         XCTAssertEqual(plan.approvedSourcePolicy, "https://registry.npmjs.org")
         let changed = NPMUpdateRunner(candidate: "1.2.0")
@@ -293,10 +387,10 @@ final class ManagerAdapterParserTests: XCTestCase {
         XCTAssertEqual(wrongCandidateVerification, .incomplete)
     }
 
-    private func makeBundle(_ url: URL, id: String, display: String) throws {
+    private func makeBundle(_ url: URL, id: String, display: String, version: String = "1.0") throws {
         let contents = url.appendingPathComponent("Contents", isDirectory: true)
         try FileManager.default.createDirectory(at: contents, withIntermediateDirectories: true)
-        let plist: [String: Any] = ["CFBundleIdentifier": id, "CFBundleDisplayName": display, "CFBundleShortVersionString": "1.0"]
+        let plist: [String: Any] = ["CFBundleIdentifier": id, "CFBundleDisplayName": display, "CFBundlePackageType": "APPL", "CFBundleVersion": version, "CFBundleShortVersionString": version]
         let data = try PropertyListSerialization.data(fromPropertyList: plist, format: .xml, options: 0)
         try data.write(to: contents.appendingPathComponent("Info.plist"))
     }

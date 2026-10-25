@@ -1,4 +1,6 @@
 import Foundation
+import AppKit
+import Darwin
 
 public enum HomebrewParser {
     public struct Package: Sendable, Equatable {
@@ -748,39 +750,177 @@ public struct AppBundleAdapter: PackageManagerAdapter {
     public let kind: ManagerKind = .appBundle
     private let explicitRoots: [String]
     public init(explicitRoots: [String] = []) { self.explicitRoots = explicitRoots }
-    private var roots: [String] { Array(Set(["/Applications", NSHomeDirectory() + "/Applications"] + explicitRoots)).filter { $0.hasPrefix("/") }.sorted() }
+    private var roots: [String] { Array(Set(["/Applications", NSHomeDirectory() + "/Applications"] + explicitRoots)).filter { Self.isAllowedScopeRoot($0, explicitRoots: explicitRoots) }.sorted() }
 
     public func detect(using runner: any ProcessRunning) async -> DetectionResult {
-        let existing = roots.filter { FileManager.default.fileExists(atPath: $0) }
+        let existing = roots.filter { Self.isSafeScopeRoot($0, explicitRoots: explicitRoots) }
         guard !existing.isEmpty else { return DetectionResult(presence: .absent, explanation: "No standard or explicitly selected Applications folder is available.") }
         let instances = existing.map { root in
-            let canonical = AdapterSupport.canonicalPath(root)
-            return ManagerInstance(id: "apps|\(canonical)", kind: .appBundle, executablePath: "/usr/bin/true", executableFingerprint: "metadata-only", scope: ManagerScope(id: canonical, displayName: canonical, canonicalRoot: canonical, isExplicitlySelected: explicitRoots.contains(root)), evidence: [ManagerEvidence(label: "Applications folder", value: canonical)])
+            let canonical = root
+            return ManagerInstance(id: "apps|\(canonical)", kind: .appBundle, executablePath: "", executableFingerprint: "native-app-trash", scope: ManagerScope(id: canonical, displayName: canonical, canonicalRoot: canonical, isExplicitlySelected: explicitRoots.contains(root)), evidence: [ManagerEvidence(label: "Applications folder", value: canonical)], removalSupported: true)
         }
         return DetectionResult(presence: .present, instances: instances)
     }
 
     public func inventory(instance: ManagerInstance, using runner: any ProcessRunning) async -> AdapterInventoryResult {
         let started = Date(), root = instance.scope.canonicalRoot ?? ""
-        let result = AppBundleInventory.scan(roots: [root], managerID: instance.id)
+        guard instance.kind == .appBundle, instance.id == "apps|\(root)", Self.isSafeScopeRoot(root, explicitRoots: explicitRoots) else {
+            return AdapterInventoryResult(installations: [], coverage: CoverageSnapshot(id: instance.id, sourceName: "Mac apps", scopeID: instance.scope.id, state: .failed, startedAt: started, completedAt: .now, warning: "The selected Applications folder is not a safe, exact app-search root."))
+        }
+        let result = AppBundleInventory.scan(roots: [root], managerID: instance.id, explicitRoots: explicitRoots)
         return AdapterInventoryResult(installations: result.installations, coverage: CoverageSnapshot(id: instance.id, sourceName: "Mac apps", scopeID: instance.scope.id, state: result.partial ? .partial : .complete, startedAt: started, completedAt: .now, itemCount: result.installations.count, warning: result.warning))
     }
 
     public func prepare(operation: ManagedOperation, installation: Installation, using runner: any ProcessRunning) async -> PlanDecision {
-        if installation.isProtected { return .blocked(reason: installation.protectionReason ?? "This Apple or system app is protected from removal.") }
-        let receipt = installation.evidence.contains(where: { $0.label == "App Store receipt" })
-        if receipt {
-            let guide = RemovalGuidance(title: "Remove \(installation.displayName)", steps: ["This app has an App Store receipt. Use the App Store's account and installed-app workflow to remove it.", "The app bundle is at \(installation.canonicalLocation). This guidance does not remove related documents, preferences, or support files."], sourceURL: URL(string: "https://support.apple.com/en-us/102610"), isVerified: false)
-            return .guidance(guide, reason: "App Store receipt evidence requires the App Store removal workflow.")
+        guard operation == .remove, installation.kind == .appBundle,
+              installation.identity.managerID == "apps|\(installation.identity.scopeID)" else {
+            return .blocked(reason: "Only a discovered app bundle in its exact app-search scope can be moved to the Trash.")
         }
-        let guide = RemovalGuidance(title: "Move \(installation.displayName) to the Trash", steps: ["Quit \(installation.displayName) if it is running.", "Check the developer's documentation or uninstaller first. If there is no uninstaller, open the exact bundle path in Finder: \(installation.canonicalLocation).", "Select that .app bundle in Finder and choose File → Move to Trash. If Finder denies access, stop and ask the app developer or administrator. Do not remove files from Library folders; this guide covers only the app bundle."], sourceURL: URL(string: "https://support.apple.com/en-us/102610"), isVerified: false)
-        return .guidance(guide, reason: "App-bundle removal is guidance-only; no direct Trash action is enabled.")
+        guard !installation.isProtected else { return .blocked(reason: installation.protectionReason ?? "This Apple or system app is protected from removal.") }
+        let fresh = await inventory(instance: Self.instance(for: installation.identity.scopeID), using: runner)
+        guard let current = fresh.installations.first(where: { $0.identity == installation.identity }),
+              current.version == installation.version else {
+            return .blocked(reason: "The app bundle changed or could not be confirmed by a fresh scan. Refresh the inventory and review it again.")
+        }
+        if let uninstaller = current.evidence.first(where: { $0.label == "Vendor uninstaller" })?.value {
+            return .guidance(RemovalGuidance(title: "Review the developer's uninstaller", steps: ["The app bundle is at \(current.canonicalLocation).", "A likely developer-provided uninstaller is present at \(uninstaller). Review the developer's instructions and its effects before using it.", "AppHarbor's Trash action moves only the app bundle and does not remove related documents, preferences, or support files."], sourceURL: URL(string: "https://support.apple.com/en-us/102610"), isVerified: false), reason: "A vendor uninstaller was found and needs review.")
+        }
+        guard let target = Self.captureEligibleTarget(for: installation, explicitRoots: explicitRoots),
+              let freshTarget = Self.captureEligibleTarget(for: current, explicitRoots: explicitRoots),
+              freshTarget == target else {
+            return .guidance(Self.guidance(for: installation), reason: "The app bundle is running, managed, protected by its location, or cannot be safely moved to the Trash.")
+        }
+        let receipt = current.evidence.contains(where: { $0.label == "App Store receipt" })
+        let receiptEffect = receipt ? ["The App Store receipt remains inside the trashed bundle as distribution evidence; subscription status and app data are not changed."] : []
+        let plan = ActionPlan(installationID: current.identity, operation: .remove, managerInstanceID: current.identity.managerID, trashTarget: target, executableFingerprint: "native-app-trash", targetFingerprint: target.metadataFingerprint, previewCommand: "Move \(current.canonicalLocation) to the Trash", knownEffects: ["Moves only the exact reviewed .app bundle to the current user's Trash."] + receiptEffect, unknownEffects: ["Related documents, preferences, support files, and subscription status are not removed or changed."], expectedResult: "The exact reviewed app bundle is absent from its original path.")
+        return .ready(plan)
     }
     public func checkUpdate(installation: Installation, using runner: any ProcessRunning) async -> UpdateCheckResult {
         UpdateCheckResult(installationID: installation.identity, status: .unsupported, currentVersion: installation.version, explanation: "This app bundle has no verified update source mapping.")
     }
-    public func revalidate(plan: ActionPlan, installation: Installation, using runner: any ProcessRunning) async -> PreflightResult { .invalidated(reason: "App-bundle direct removal is not enabled.") }
-    public func verify(plan: ActionPlan, installation: Installation, using runner: any ProcessRunning) async -> VerificationResult { .incomplete }
+    public func revalidate(plan: ActionPlan, installation: Installation, using runner: any ProcessRunning) async -> PreflightResult {
+        guard plan.installationID == installation.identity, plan.managerInstanceID == installation.identity.managerID,
+              plan.operation == .remove, plan.executableFingerprint == "native-app-trash",
+              let target = Self.trashTarget(from: plan), target.appPath == installation.canonicalLocation,
+              target.metadataFingerprint == plan.targetFingerprint,
+              !installation.isProtected else { return .invalidated(reason: "The reviewed app bundle target changed or is no longer eligible.") }
+        let fresh = await inventory(instance: Self.instance(for: installation.identity.scopeID), using: runner)
+        guard let current = fresh.installations.first(where: { $0.identity == installation.identity }),
+              current.version == installation.version,
+              let currentTarget = Self.captureEligibleTarget(for: current, explicitRoots: explicitRoots), currentTarget == target else {
+            return .invalidated(reason: "Fresh app-bundle metadata no longer matches the reviewed Trash target.")
+        }
+        return .valid(currentTargetFingerprint: target.metadataFingerprint, currentExecutableFingerprint: "native-app-trash")
+    }
+    public func verify(plan: ActionPlan, installation: Installation, using runner: any ProcessRunning) async -> VerificationResult {
+        guard plan.installationID == installation.identity, let target = Self.trashTarget(from: plan),
+              target.appPath == installation.canonicalLocation else { return .incomplete }
+        guard Self.isSafeScopeRoot(installation.identity.scopeID, explicitRoots: explicitRoots),
+              target.scopeRoot == installation.identity.scopeID else { return .incomplete }
+        return FileManager.default.fileExists(atPath: target.appPath) ? .stillPresent : .verifiedRemoved
+    }
+
+    fileprivate static func isAllowedScopeRoot(_ path: String, explicitRoots: [String] = []) -> Bool {
+        guard let normalized = lexicalAbsolutePath(path) else { return false }
+        let homeApps = (lexicalAbsolutePath(NSHomeDirectory()) ?? NSHomeDirectory()) + "/Applications"
+        if normalized == "/Applications" || normalized == homeApps { return true }
+        // Explicit roots must be a concrete user-selected directory, never a volume,
+        // home, system or other ancestor that would broaden Trash authority.
+        let home = lexicalAbsolutePath(NSHomeDirectory()) ?? NSHomeDirectory()
+        let components = normalized.split(separator: "/").map { String($0) }
+        let blockedComponents: Set<String> = ["System", "usr", "bin", "sbin", "Library", "Caskroom", "Cellar", ".Trash", ".Trashes", "Trash"]
+        let managerRoots = ["/opt/homebrew", "/usr/local", "/usr", "/bin", "/sbin"]
+        let underUsers = normalized == "/Users" || normalized.hasPrefix("/Users/")
+        return explicitRoots.contains(path) && normalized != "/" && normalized != home
+            && !normalized.hasPrefix(home + "/Library")
+            && (!underUsers || normalized.hasPrefix(home + "/"))
+            && !components.contains(where: { blockedComponents.contains($0) || $0.hasSuffix(".app") })
+            && !managerRoots.contains(where: { normalized == $0 || normalized.hasPrefix($0 + "/") })
+    }
+
+    fileprivate static func isSafeScopeRoot(_ path: String, explicitRoots: [String] = []) -> Bool {
+        guard isAllowedScopeRoot(path, explicitRoots: explicitRoots), lexicalAbsolutePath(path) == path,
+              !hasSymlinkComponent(path) else { return false }
+        var directory: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: path, isDirectory: &directory), directory.boolValue else { return false }
+        return FileManager.default.isReadableFile(atPath: path)
+    }
+
+    fileprivate static func isWritableScopeRoot(_ path: String, explicitRoots: [String] = []) -> Bool {
+        isSafeScopeRoot(path, explicitRoots: explicitRoots) && FileManager.default.isWritableFile(atPath: path)
+    }
+
+    fileprivate static func hasSymlinkComponent(_ path: String) -> Bool {
+        guard let lexicalPath = lexicalAbsolutePath(path) else { return true }
+        var prefix = ""
+        for component in lexicalPath.split(separator: "/") {
+            prefix += "/" + component
+            var info = Darwin.stat()
+            guard prefix.withCString({ Darwin.lstat($0, &info) }) == 0 else { return true }
+            if (info.st_mode & S_IFMT) == S_IFLNK { return true }
+        }
+        return false
+    }
+
+    fileprivate static func lexicalAbsolutePath(_ path: String) -> String? {
+        guard path.hasPrefix("/"), !path.contains("\0"), !path.contains("\\") else { return nil }
+        let components = path.split(separator: "/", omittingEmptySubsequences: true)
+        guard !components.contains(where: { $0 == "." || $0 == ".." }) else { return nil }
+        return components.isEmpty ? "/" : "/" + components.joined(separator: "/")
+    }
+
+    fileprivate static func instance(for root: String) -> ManagerInstance {
+        ManagerInstance(id: "apps|\(root)", kind: .appBundle, executablePath: "", executableFingerprint: "native-app-trash", scope: ManagerScope(id: root, displayName: root, canonicalRoot: root))
+    }
+
+    private static func trashTarget(from plan: ActionPlan) -> AppBundleTrashTarget? {
+        guard case let .appBundleTrash(target) = plan.execution else { return nil }
+        return target
+    }
+
+    fileprivate static func captureEligibleTarget(for installation: Installation, explicitRoots: [String] = []) -> AppBundleTrashTarget? {
+        guard !installation.evidence.contains(where: { $0.label == "Vendor uninstaller" }),
+              isWritableScopeRoot(installation.identity.scopeID, explicitRoots: explicitRoots),
+              FileManager.default.isWritableFile(atPath: URL(fileURLWithPath: installation.canonicalLocation).deletingLastPathComponent().path),
+              !isRunning(bundleID: installation.bundleIdentifier, path: installation.canonicalLocation) else { return nil }
+        return captureVerifiedTarget(for: installation, explicitRoots: explicitRoots)
+    }
+
+    fileprivate static func captureVerifiedTarget(for installation: Installation, explicitRoots: [String] = []) -> AppBundleTrashTarget? {
+        let path = installation.canonicalLocation, root = installation.identity.scopeID
+        guard installation.kind == .appBundle, installation.identity.managerID == "apps|\(root)",
+              isSafeScopeRoot(root, explicitRoots: explicitRoots), path.hasSuffix(".app"), AdapterSupport.rootIsWithin(path, root: root),
+              lexicalAbsolutePath(path) == path, !hasSymlinkComponent(path),
+              !isManagedPackagePath(path), !isSelf(path), !isAppleProtected(bundleID: installation.bundleIdentifier, path: path),
+              let info = BundleInfo.read(path), info.bundleIdentifier == installation.bundleIdentifier,
+              let target = AppBundleTrashTarget.capture(path: path, scopeRoot: root, bundleIdentifier: info.bundleIdentifier),
+              target.appPath == path, target.scopeRoot == root else { return nil }
+        return target
+    }
+
+    fileprivate static func isManagedPackagePath(_ path: String) -> Bool {
+        let components = URL(fileURLWithPath: path).pathComponents
+        return components.contains("Caskroom") || components.contains("Cellar")
+    }
+
+    fileprivate static func isSelf(_ path: String, bundleID: String? = nil) -> Bool {
+        let own = Bundle.main.bundleURL.resolvingSymlinksInPath().standardizedFileURL.path
+        return path == own || (bundleID != nil && bundleID == Bundle.main.bundleIdentifier)
+    }
+
+    fileprivate static func isAppleProtected(bundleID: String?, path: String) -> Bool {
+        path.hasPrefix("/System/") || bundleID?.hasPrefix("com.apple.") == true
+    }
+
+    fileprivate static func isRunning(bundleID: String?, path: String) -> Bool {
+        NSWorkspace.shared.runningApplications.contains { app in
+            app.bundleURL?.resolvingSymlinksInPath().standardizedFileURL.path == path
+        }
+    }
+
+    fileprivate static func guidance(for installation: Installation) -> RemovalGuidance {
+        RemovalGuidance(title: "Review removal for \(installation.displayName)", steps: ["The app bundle is at \(installation.canonicalLocation).", "Quit the app and check the developer's documentation or uninstaller first.", "If there is no uninstaller and Finder allows it, select only this .app bundle and choose File → Move to Trash. This action does not remove related documents, preferences, support files, or subscription status."], sourceURL: URL(string: "https://support.apple.com/en-us/102610"), isVerified: false)
+    }
 }
 
 public struct AppBundleScanResult: Sendable {
@@ -797,47 +937,74 @@ public enum AppBundleInventory {
         return AdapterSupport.canonicalPath(path) == AdapterSupport.canonicalPath(appBundle.canonicalLocation)
     }
 
-    public static func scan(roots: [String], managerID: String = "apps") -> AppBundleScanResult {
+    public static func scan(roots: [String], managerID: String = "apps", explicitRoots: [String] = []) -> AppBundleScanResult {
         var rows: [Installation] = []; var partial = false; var problems: [String] = []
         for rawRoot in roots {
-            guard rawRoot.hasPrefix("/") else { partial = true; problems.append("A selected Applications location was not absolute."); continue }
-            let root = AdapterSupport.canonicalPath(rawRoot)
+            guard rawRoot.hasPrefix("/"), !rawRoot.contains("\0") else { partial = true; problems.append("A selected Applications location was not absolute."); continue }
+            guard let root = AppBundleAdapter.lexicalAbsolutePath(rawRoot) else { partial = true; problems.append("A selected Applications location was not an exact lexical path."); continue }
             var isDirectory: ObjCBool = false
-            guard FileManager.default.fileExists(atPath: root, isDirectory: &isDirectory), isDirectory.boolValue else { partial = true; problems.append("An Applications folder is unavailable: \(rawRoot)"); continue }
+            guard FileManager.default.fileExists(atPath: root, isDirectory: &isDirectory), isDirectory.boolValue,
+                  !AppBundleAdapter.hasSymlinkComponent(root) else { partial = true; problems.append("An Applications folder is unavailable or contains a symbolic-link path: \(rawRoot)"); continue }
             do {
-                var pending = [URL(fileURLWithPath: rawRoot, isDirectory: true)]
+                var pending = [root]
                 var visited = Set<String>()
                 var examined = 0
-                while let directory = pending.popLast() {
-                    let directoryPath = directory.standardizedFileURL.path
+                while let directoryPath = pending.popLast() {
+                    let directory = URL(fileURLWithPath: directoryPath, isDirectory: true)
                     guard AdapterSupport.rootIsWithin(directoryPath, root: root), visited.insert(directoryPath).inserted else { continue }
                     examined += 1
                     if examined > 4096 { partial = true; problems.append("Applications folder traversal reached its safety limit: \(rawRoot)"); break }
                     let children = try FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: [.isDirectoryKey, .isSymbolicLinkKey], options: [.skipsHiddenFiles])
                     for child in children {
                     if child.pathExtension.lowercased() == "app" {
-                    let originalPath = child.standardizedFileURL.path
+                    let originalPath = directoryPath + "/" + child.lastPathComponent
                     let canonical = AdapterSupport.canonicalPath(originalPath)
-                    let escapesRoot = !AdapterSupport.rootIsWithin(canonical, root: root)
+                    let isSymlink = AppBundleAdapter.hasSymlinkComponent(originalPath)
+                    let escapesRoot = !AdapterSupport.rootIsWithin(canonical, root: root) || isSymlink
                     guard let info = BundleInfo.read(canonical) else { partial = true; continue }
                     let id = info.bundleIdentifier ?? "unknown-bundle-\(canonical)"
                     let receipt = FileManager.default.fileExists(atPath: canonical + "/Contents/_MASReceipt/receipt")
-                    let isSystem = canonical.hasPrefix("/System/") || canonical.hasPrefix("/System/Applications/") || (info.bundleIdentifier?.hasPrefix("com.apple.") == true)
-                    let isProtected = escapesRoot || isSystem
-                    let reason = escapesRoot ? "The bundle resolves outside its selected Applications folder." : (isSystem ? "Apple system components are protected." : nil)
+                    let isSystem = AppBundleAdapter.isAppleProtected(bundleID: info.bundleIdentifier, path: canonical)
+                    let isManaged = AppBundleAdapter.isManagedPackagePath(canonical)
+                    let isSelf = AppBundleAdapter.isSelf(canonical, bundleID: info.bundleIdentifier)
+                    let isProtected = escapesRoot || isSystem || isManaged || isSelf
+                    let reason = escapesRoot ? "The bundle is reached through a symbolic link or resolves outside its selected Applications folder." : (isSystem ? "Apple system components are protected." : (isManaged ? "This bundle is inside a Homebrew-managed Caskroom or Cellar." : (isSelf ? "AppHarbor cannot remove its own app bundle." : nil)))
                     var evidence = [ManagerEvidence(label: "Bundle identifier", value: info.bundleIdentifier ?? "Unknown")]
-                    evidence.append(ManagerEvidence(label: receipt ? "App Store receipt" : "Source", value: receipt ? "Present; distribution evidence only" : "Unknown"))
-                    if escapesRoot { evidence.append(ManagerEvidence(label: "Symlink target", value: canonical)) }
-                    let identity = InstallationID(managerID: managerID, scopeID: root, nativeID: id, canonicalLocation: canonical)
-                    rows.append(Installation(identity: identity, kind: .appBundle, displayName: info.displayName, version: info.version, canonicalLocation: canonical, bundleIdentifier: info.bundleIdentifier, ownership: receipt ? .ambiguous : .unknown, evidence: evidence, isProtected: isProtected, protectionReason: reason))
+                    evidence.append(ManagerEvidence(label: receipt ? "App Store receipt" : "Source", value: receipt ? "Present; preserved as distribution evidence" : "Unknown"))
+                    if escapesRoot { evidence.append(ManagerEvidence(label: "Symlink or resolved target", value: canonical)) }
+                    if let uninstaller = vendorUninstaller(in: canonical) { evidence.append(ManagerEvidence(label: "Vendor uninstaller", value: uninstaller)) }
+                    let identityPath = originalPath
+                    let identity = InstallationID(managerID: managerID, scopeID: root, nativeID: id, canonicalLocation: identityPath)
+                    let provisional = Installation(identity: identity, kind: .appBundle, displayName: info.displayName, version: info.version, canonicalLocation: identityPath, bundleIdentifier: info.bundleIdentifier, ownership: .unknown, evidence: evidence, isProtected: isProtected, protectionReason: reason)
+                    let target = isProtected ? nil : AppBundleAdapter.captureVerifiedTarget(for: provisional, explicitRoots: explicitRoots)
+                    if target != nil { evidence.append(ManagerEvidence(label: "Filesystem target", value: "Exact bundle path, device, inode, and metadata fingerprint verified")) }
+                    let removable = target != nil
+                        && AppBundleAdapter.isWritableScopeRoot(root, explicitRoots: explicitRoots)
+                        && FileManager.default.isWritableFile(atPath: URL(fileURLWithPath: identityPath).deletingLastPathComponent().path)
+                        && !AppBundleAdapter.isRunning(bundleID: info.bundleIdentifier, path: identityPath)
+                        && !evidence.contains(where: { $0.label == "Vendor uninstaller" })
+                    rows.append(Installation(identity: identity, kind: .appBundle, displayName: info.displayName, version: info.version, canonicalLocation: identityPath, bundleIdentifier: info.bundleIdentifier, ownership: target == nil ? .unknown : .verified, evidence: evidence, isProtected: isProtected, protectionReason: reason, removalSupported: removable))
                     } else if let values = try? child.resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey]), values.isDirectory == true, values.isSymbolicLink != true {
-                        pending.append(child)
+                        pending.append(directoryPath + "/" + child.lastPathComponent)
                     }
                     }
                 }
             } catch { partial = true; problems.append("Could not read Applications folder: \(rawRoot)") }
         }
         return AppBundleScanResult(installations: rows.sorted { $0.canonicalLocation < $1.canonicalLocation }, partial: partial, warning: problems.isEmpty ? nil : problems.joined(separator: " "))
+    }
+
+    private static func vendorUninstaller(in appPath: String) -> String? {
+        let resources = appPath + "/Contents/Resources"
+        guard let entries = try? FileManager.default.contentsOfDirectory(atPath: resources) else { return nil }
+        return entries.sorted().first(where: { name in
+            let lower = name.lowercased()
+            guard lower.contains("uninstall") else { return false }
+            var isDirectory: ObjCBool = false
+            let path = resources + "/" + name
+            return FileManager.default.fileExists(atPath: path, isDirectory: &isDirectory)
+                && (isDirectory.boolValue || FileManager.default.isExecutableFile(atPath: path))
+        }).map { resources + "/" + $0 }
     }
 }
 

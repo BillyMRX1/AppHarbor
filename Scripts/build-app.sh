@@ -33,8 +33,8 @@ cat > "$APP_PATH/Contents/Info.plist" <<'PLIST'
     <key>CFBundleIdentifier</key><string>com.appharbor.desktop</string>
     <key>CFBundleName</key><string>AppHarbor</string>
     <key>CFBundlePackageType</key><string>APPL</string>
-    <key>CFBundleShortVersionString</key><string>0.2.0</string>
-    <key>CFBundleVersion</key><string>4</string>
+    <key>CFBundleShortVersionString</key><string>0.3.0</string>
+    <key>CFBundleVersion</key><string>5</string>
     <key>CFBundleIconFile</key><string>AppHarbor.icns</string>
     <key>LSMinimumSystemVersion</key><string>14.0</string>
     <key>NSHighResolutionCapable</key><true/>

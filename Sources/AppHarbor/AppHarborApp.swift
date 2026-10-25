@@ -39,11 +39,11 @@ private struct AppHarborCommands: Commands {
             }
             .keyboardShortcut("i", modifiers: [.command, .option])
             .disabled(model.selectedInstallation == nil || model.isExecutingOperation || model.isPreparingPlan || model.planDecision != nil)
-            Button("Remove Selected…") {
+            Button(model.selectedInstallation.map { model.usesNativeTrash(for: $0) } == true ? "Move Selected to Trash…" : "Remove Selected…") {
                 guard let item = model.selectedInstallation else { return }
                 Task { await model.prepare(.remove, for: item) }
             }
-            .disabled(model.selectedInstallation == nil || model.selectedInstallation.map { !$0.removalSupported || $0.isProtected || $0.isStale || $0.ownership != .verified } ?? true || model.isExecutingOperation || model.isPreparingPlan || model.planDecision != nil)
+            .disabled(model.selectedInstallation.map { !model.removalReviewAvailable(for: $0) } ?? true)
         }
     }
 }

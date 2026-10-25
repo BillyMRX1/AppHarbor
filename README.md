@@ -3,7 +3,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/BillyMRX1/AppHarbor/releases/download/v0.2.0/AppHarbor-0.2.0-arm64.dmg"><strong>Download AppHarbor 0.2.0 · Apple silicon</strong></a>
+  <a href="https://github.com/BillyMRX1/AppHarbor/releases/download/v0.3.0/AppHarbor-0.3.0-arm64.dmg"><strong>Download AppHarbor 0.3.0 · Apple silicon</strong></a>
   &nbsp;·&nbsp; <a href="https://github.com/BillyMRX1/AppHarbor/releases">Releases</a>
   &nbsp;·&nbsp; <a href="LICENSE">MIT License</a>
 </p>
@@ -20,7 +20,7 @@ AppHarbor brings supported Mac applications and package-manager installs into on
 - Organizes supported application folders and detected Homebrew, npm, pipx, and Cargo installations in a searchable library.
 - Shows source, scope, version, kind, and ownership details where the source reports them.
 - Lets you view the library as a sortable list or a selectable grid, with the same contextual actions in either view.
-- Reviews the exact target and proposed effects before a supported manager action, then checks the owning scope again afterward.
+- Reviews the exact target and proposed effects before a supported manager action, or moves an eligible app bundle to Finder Trash, then verifies the result.
 - Keeps inventory and activity data on your Mac. AppHarbor does not need root access or Full Disk Access.
 
 AppHarbor checks supported locations and detected manager scopes; it does not claim to find every executable or application on the Mac. The Sources and Settings views explain what was detected and which application folders are included.
@@ -29,11 +29,11 @@ AppHarbor checks supported locations and detected manager scopes; it does not cl
 
 AppHarbor includes an optional local MCP bridge for compatible AI clients. The bridge and AI action requests are separate settings, and both are off by default. Settings can copy a generic client configuration for the installed app; AppHarbor does not edit a client configuration automatically. Keep AppHarbor open while a connected client uses it. See [MCP setup and tool details](Docs/MCP.md).
 
-The connected client can receive installed software names, versions, and source paths, and its provider may forward that context to a model service. AI action requests are limited to supported removal and update reviews. AppHarbor shows the exact target in its native interface, and a person must confirm there before execution. The bridge does not provide arbitrary shell commands, filesystem access, batch uninstall, junk cleanup, or root operations.
+The connected client can receive installed software names, versions, and source paths, and its provider may forward that context to a model service. AI action requests are limited to supported removal and update reviews. AppHarbor shows the exact target and action in its native interface, and a person must confirm there before execution. The bridge does not provide arbitrary shell commands, filesystem access, batch uninstall, junk cleanup, or root operations.
 
 ## Download and install
 
-Download the Apple silicon disk image from the [AppHarbor 0.2.0 release](https://github.com/BillyMRX1/AppHarbor/releases/tag/v0.2.0). Open `AppHarbor-0.2.0-arm64.dmg`, then drag **AppHarbor.app** to **Applications**. Open it from Applications.
+Download the Apple silicon disk image from the [AppHarbor 0.3.0 release](https://github.com/BillyMRX1/AppHarbor/releases/tag/v0.3.0). Open `AppHarbor-0.3.0-arm64.dmg`, then drag **AppHarbor.app** to **Applications**. Open it from Applications.
 
 This preview is ad-hoc signed and not notarized. If macOS blocks launch, see [Apple’s instructions for apps from an unknown developer](https://support.apple.com/guide/mac-help/open-a-mac-app-from-an-unknown-developer-mh40616/mac).
 
@@ -47,7 +47,11 @@ Capabilities vary by detected manager version, installation, and scope. AppHarbo
 | npm | Checks and applies updates only when the exact public npm registry source is verified. Other cases show guidance. |
 | pipx | Can report an update candidate; applying pipx updates remains manual guidance because saved install options and source details cannot yet be constrained to the reviewed candidate. |
 | Cargo | Inventories explicitly selected install roots. Update checks and updates are guidance-only. |
-| App bundles | Shows local app details and removal guidance. App-bundle removal and update checks are guidance-only. |
+| App bundles | Eligible `.app` bundles can be moved to Finder Trash after explicit review. Known links to package-manager installs keep their source-specific removal flow. The Trash action moves only the app bundle; installer records and support files may remain, and the developer’s uninstaller may be required. AppHarbor cannot move the running app, itself, protected apps, or bundles it cannot verify or access; these cases show guidance or an error. App-bundle update checks remain guidance-only. |
+
+Package-manager installs, including Homebrew casks, continue to use their source-specific removal flow. AppHarbor verifies the exact app bundle for a Trash action, but cannot prove that no other installer tracks it. AppHarbor does not force-quit an app or request administrator access to move an app bundle.
+
+Native Trash supports app bundles directly inside a configured application folder; add a nested folder as its own scan location to inventory its app bundles.
 
 Update checks are explicit and run per installation. They do not run automatically.
 
@@ -70,7 +74,7 @@ To create the release disk image after building:
 Scripts/package-dmg.sh
 ```
 
-This writes `dist/AppHarbor-0.2.0-arm64.dmg` and includes the drag-to-Applications instructions. Public distribution with a Developer ID signature and notarization is still pending.
+This writes `dist/AppHarbor-0.3.0-arm64.dmg` and includes the drag-to-Applications instructions. Public distribution with a Developer ID signature and notarization is still pending.
 
 ## Local data and uninstall
 

@@ -1,5 +1,7 @@
 import Foundation
 
+private enum ActionExecutionGuardError: Error { case reviewExpired }
+
 public protocol InstallationStoring: Sendable {
     func loadSnapshot() async -> InventorySnapshot
     func saveSnapshot(_ snapshot: InventorySnapshot) async
@@ -28,6 +30,7 @@ public actor InMemoryInstallationStore: InstallationStoring {
 public actor AppHarborCoreEngine {
     private let adapters: [any PackageManagerAdapter]
     private let runner: any ProcessRunning
+    private let appTrashExecutor: any NativeAppTrashExecuting
     private let store: any InstallationStoring
     private var cachedSnapshot: InventorySnapshot?
     private var plans: [UUID: ActionPlan] = [:]
@@ -36,8 +39,8 @@ public actor AppHarborCoreEngine {
     private var refreshInProgress = false
     private var subscribers: [UUID: AsyncStream<EngineEvent>.Continuation] = [:]
 
-    public init(adapters: [any PackageManagerAdapter], runner: any ProcessRunning = FoundationProcessRunner(), store: (any InstallationStoring)? = nil) {
-        self.adapters = adapters; self.runner = runner; self.store = store ?? LocalJSONInstallationStore.applicationDefault()
+    public init(adapters: [any PackageManagerAdapter], runner: any ProcessRunning = FoundationProcessRunner(), appTrashExecutor: any NativeAppTrashExecuting = FileManagerAppTrashExecutor(), store: (any InstallationStoring)? = nil) {
+        self.adapters = adapters; self.runner = runner; self.appTrashExecutor = appTrashExecutor; self.store = store ?? LocalJSONInstallationStore.applicationDefault()
     }
 
     public func events() -> AsyncStream<EngineEvent> {
@@ -134,10 +137,29 @@ public actor AppHarborCoreEngine {
         let decision = await adapter.prepare(operation: operation, installation: installation, using: runner)
         guard case let .ready(plan) = decision else { return decision }
         let capabilityAllowed = operation == .remove ? installation.removalSupported && manager.removalSupported : installation.updateSupported && manager.updateSupported
-        guard manager.presence == .present, installation.ownership == .verified, capabilityAllowed,
+        let hasExactPackageManagerOwnership: (String) -> Bool = { path in
+            snapshot.installations.filter { $0.kind == .cask && $0.ownership == .verified }.contains { cask in
+                cask.evidence.filter { $0.label == "Bundle path" }.contains { evidence in
+                    evidence.value.hasPrefix("/") && URL(fileURLWithPath: evidence.value).standardizedFileURL.path == path
+                }
+            }
+        }
+        let executionMatches: Bool
+        switch plan.execution {
+        case let .process(command):
+            executionMatches = command.executablePath == manager.executablePath && plan.executableFingerprint == manager.executableFingerprint && manager.kind != .appBundle
+        case let .appBundleTrash(target):
+            executionMatches = operation == .remove && manager.kind == .appBundle && installation.kind == .appBundle
+                && installation.identity.scopeID == manager.scope.id && installation.identity.nativeID == target.bundleIdentifier
+                && target.appPath == installation.canonicalLocation && target.scopeRoot == manager.scope.canonicalRoot
+                && target.metadataFingerprint == plan.targetFingerprint && plan.executableFingerprint == "native-app-trash"
+                && NativeAppTrash.isValid(target) && NativeAppTrash.fingerprintMatches(target)
+                && !NativeAppTrash.isProtected(target) && !NativeAppTrash.isRunning(target) && NativeAppTrash.isWritable(target)
+                && !hasExactPackageManagerOwnership(target.appPath)
+        }
+        guard operation == plan.operation, manager.presence == .present, installation.ownership == .verified, capabilityAllowed,
               plan.installationID == installation.identity, plan.managerInstanceID == manager.id,
-              plan.command.executablePath == manager.executablePath, plan.executableFingerprint == manager.executableFingerprint,
-              !plan.privilegeRequired else { return .blocked(reason: "This action is not verified for the current manager, scope, target, and capability.") }
+              executionMatches, !plan.privilegeRequired else { return .blocked(reason: "This action is not verified for the current manager, scope, target, and capability.") }
         plans[plan.id] = plan
         return .ready(plan)
     }
@@ -164,7 +186,7 @@ public actor AppHarborCoreEngine {
         var record = TaskRecord(planID: plan.id, installationID: plan.installationID, operation: plan.operation, state: .running, redactedSummary: "Starting the reviewed operation.")
         await store.appendTask(record); publish(.operationChanged(record))
         guard !Task.isCancelled else {
-            record.state = .invalidated; record.completedAt = .now; record.redactedSummary = "Cancelled before target revalidation or command launch."
+            record.state = .invalidated; record.completedAt = .now; record.redactedSummary = "Cancelled before target revalidation or action launch."
             activePlanIDs.remove(planID)
             await store.appendTask(record); publish(.operationChanged(record)); await reinventoryScope(adapter: adapter, manager: manager, rootKey: rootKey)
             lockedRoots.remove(rootKey)
@@ -172,7 +194,7 @@ public actor AppHarborCoreEngine {
         }
         let preflight = await adapter.revalidate(plan: plan, installation: installation, using: runner)
         if Task.isCancelled {
-            record.state = .invalidated; record.completedAt = .now; record.redactedSummary = "Cancelled before the command launched."
+            record.state = .invalidated; record.completedAt = .now; record.redactedSummary = "Cancelled before the action launched."
             activePlanIDs.remove(planID)
             await store.appendTask(record); publish(.operationChanged(record)); await reinventoryScope(adapter: adapter, manager: manager, rootKey: rootKey)
             lockedRoots.remove(rootKey)
@@ -188,32 +210,74 @@ public actor AppHarborCoreEngine {
         var launchAttempted = false
         do {
             guard !Task.isCancelled else { throw ProcessRunnerError.cancelledBeforeLaunch }
-            launchAttempted = true
-            let result = try await runner.run(plan.command)
-            record.exitCode = result.exitCode; record.state = .verifying; record.redactedSummary = "The command finished; checking the same manager scope."
-            await store.appendTask(record); publish(.operationChanged(record))
-            record.verification = await verifyWithoutCallerCancellation(adapter: adapter, plan: plan, installation: installation)
-            if plan.operation == .remove && record.verification == .verifiedRemoved || plan.operation == .update && record.verification == .verifiedUpdated {
-                record.state = .succeeded; record.redactedSummary = "The manager's inventory confirms the requested change."
-            } else if result.wasCancelled || result.didTimeOut { record.state = .outcomeUnknown; record.redactedSummary = "The operation was interrupted. Check the installation state before retrying." }
-            else if result.exitCode == 0 {
-                record.state = .outcomeUnknown; record.redactedSummary = "The command completed, but the manager could not confirm the requested change."
-            } else {
-                record.state = .failed; record.redactedSummary = "The manager reported failure; the installation was checked again."
+            switch plan.execution {
+            case let .process(command):
+                guard plan.expiresAt > .now else { throw ActionExecutionGuardError.reviewExpired }
+                launchAttempted = true
+                let result = try await runner.run(command)
+                record.exitCode = result.exitCode; record.state = .verifying; record.redactedSummary = "The command finished; checking the same manager scope."
+                await store.appendTask(record); publish(.operationChanged(record))
+                record.verification = await verifyWithoutCallerCancellation(adapter: adapter, plan: plan, installation: installation)
+                if plan.operation == .remove && record.verification == .verifiedRemoved || plan.operation == .update && record.verification == .verifiedUpdated {
+                    record.state = .succeeded; record.redactedSummary = "The manager's inventory confirms the requested change."
+                } else if result.wasCancelled || result.didTimeOut { record.state = .outcomeUnknown; record.redactedSummary = "The operation was interrupted. Check the installation state before retrying." }
+                else if result.exitCode == 0 {
+                    record.state = .outcomeUnknown; record.redactedSummary = "The command completed, but the manager could not confirm the requested change."
+                } else {
+                    record.state = .failed; record.redactedSummary = "The manager reported failure; the installation was checked again."
+                }
+            case let .appBundleTrash(target):
+                guard plan.operation == .remove, manager.kind == .appBundle, installation.kind == .appBundle,
+                      installation.identity.scopeID == manager.scope.id, installation.identity.nativeID == target.bundleIdentifier,
+                      target.appPath == installation.canonicalLocation, target.scopeRoot == manager.scope.canonicalRoot,
+                      target.metadataFingerprint == plan.targetFingerprint, NativeAppTrash.isValid(target), NativeAppTrash.fingerprintMatches(target) else {
+                    throw NativeAppTrashError.changedTarget
+                }
+                guard plan.expiresAt > .now else { throw ActionExecutionGuardError.reviewExpired }
+                launchAttempted = true
+                let result = try appTrashExecutor.trash(target)
+                record.state = .verifying; record.redactedSummary = "The app moved to Trash; checking the same manager scope."
+                await store.appendTask(record); publish(.operationChanged(record))
+                record.verification = result.isVerified ? .verifiedRemoved : .incomplete
+                record.state = result.isVerified ? .succeeded : .outcomeUnknown
+                record.redactedSummary = result.isVerified ? "The exact app bundle is in Trash and absent from its original location." : "The app move could not be verified; check Trash and the original location."
             }
         } catch {
-            let processMayHaveLaunched: Bool
-            if let runnerError = error as? ProcessRunnerError {
-                if case .waitFailed = runnerError { processMayHaveLaunched = true } else { processMayHaveLaunched = false }
-            } else { processMayHaveLaunched = launchAttempted }
-            if !processMayHaveLaunched {
-                record.state = .invalidated; record.redactedSummary = "The command was rejected before launch."
+            if error is ActionExecutionGuardError {
+                record.state = .invalidated; record.redactedSummary = "The review expired before the action launched. Prepare a new review."
+            } else if case .appBundleTrash = plan.execution {
+                if let trashError = error as? NativeAppTrashError {
+                    switch trashError {
+                    case .invalidTarget, .changedTarget, .protectedTarget, .runningTarget:
+                        record.state = .invalidated; record.redactedSummary = "The app changed or is not eligible for removal. Prepare a new review."
+                    case .permissionDenied:
+                        record.state = .failed; record.redactedSummary = "AppHarbor could not move the app to Trash with your current permissions."
+                    case .trashVerificationFailed:
+                        record.state = .outcomeUnknown; record.verification = .incomplete
+                        record.redactedSummary = "The app move could not be verified. Check both Finder Trash and the original location."
+                    }
+                } else if isWritePermissionError(error) {
+                    record.state = .failed; record.redactedSummary = "AppHarbor could not move the app to Trash with your current permissions."
+                } else if error is ProcessRunnerError {
+                    record.state = .invalidated; record.redactedSummary = "Cancelled before the app moved to Trash."
+                } else {
+                    record.state = .outcomeUnknown; record.verification = .incomplete
+                    record.redactedSummary = "The app move could not be verified. Check both Finder Trash and the original location."
+                }
             } else {
-                record.state = .verifying; record.redactedSummary = "The process ended unexpectedly; checking the installation state."
-                record.verification = await verifyWithoutCallerCancellation(adapter: adapter, plan: plan, installation: installation)
-                record.state = (plan.operation == .remove && record.verification == .verifiedRemoved) || (plan.operation == .update && record.verification == .verifiedUpdated) ? .succeeded : .outcomeUnknown
-                if record.state == .succeeded { record.redactedSummary = "The manager's inventory confirms the requested change." }
-                else { record.redactedSummary = "The operation outcome is uncertain; check the installation state before retrying." }
+                let processMayHaveLaunched: Bool
+                if let runnerError = error as? ProcessRunnerError {
+                    if case .waitFailed = runnerError { processMayHaveLaunched = true } else { processMayHaveLaunched = false }
+                } else { processMayHaveLaunched = launchAttempted }
+                if !processMayHaveLaunched {
+                    record.state = .invalidated; record.redactedSummary = "The command was rejected before launch."
+                } else {
+                    record.state = .verifying; record.redactedSummary = "The process ended unexpectedly; checking the installation state."
+                    record.verification = await verifyWithoutCallerCancellation(adapter: adapter, plan: plan, installation: installation)
+                    record.state = (plan.operation == .remove && record.verification == .verifiedRemoved) || (plan.operation == .update && record.verification == .verifiedUpdated) ? .succeeded : .outcomeUnknown
+                    if record.state == .succeeded { record.redactedSummary = "The manager's inventory confirms the requested change." }
+                    else { record.redactedSummary = "The operation outcome is uncertain; check the installation state before retrying." }
+                }
             }
         }
         record.completedAt = .now; activePlanIDs.remove(planID)
@@ -301,6 +365,10 @@ public actor AppHarborCoreEngine {
     }
     private func immediateRecord(plan: ActionPlan, state: TaskState, summary: String) -> TaskRecord {
         TaskRecord(planID: plan.id, installationID: plan.installationID, operation: plan.operation, state: state, completedAt: .now, redactedSummary: summary)
+    }
+    private func isWritePermissionError(_ error: Error) -> Bool {
+        guard let cocoa = error as? CocoaError else { return false }
+        return cocoa.code == .fileWriteNoPermission || cocoa.code == .fileWriteVolumeReadOnly
     }
     private func immediateRecord(planID: UUID, state: TaskState, summary: String) -> TaskRecord {
         TaskRecord(planID: planID, installationID: InstallationID(managerID: "", scopeID: "", nativeID: "", canonicalLocation: ""), operation: .remove, state: state, completedAt: .now, redactedSummary: summary)
