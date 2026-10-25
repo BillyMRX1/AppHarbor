@@ -3,7 +3,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/BillyMRX1/AppHarbor/releases/download/v0.3.0/AppHarbor-0.3.0-arm64.dmg"><strong>Download AppHarbor 0.3.0 · Apple silicon</strong></a>
+  <a href="https://github.com/BillyMRX1/AppHarbor/releases/download/v0.3.1/AppHarbor-0.3.1-arm64.dmg"><strong>Download AppHarbor 0.3.1 · Apple silicon</strong></a>
   &nbsp;·&nbsp; <a href="https://github.com/BillyMRX1/AppHarbor/releases">Releases</a>
   &nbsp;·&nbsp; <a href="LICENSE">MIT License</a>
 </p>
@@ -21,6 +21,7 @@ AppHarbor brings supported Mac applications and package-manager installs into on
 - Shows source, scope, version, kind, and ownership details where the source reports them.
 - Lets you view the library as a sortable list or a selectable grid, with the same contextual actions in either view.
 - Reviews the exact target and proposed effects before a supported manager action, or moves an eligible app bundle to Finder Trash, then verifies the result.
+- Offers read-only Finder and path shortcuts for an installation, and reveals a detected vendor uninstaller without opening it.
 - Keeps inventory and activity data on your Mac. AppHarbor does not need root access or Full Disk Access.
 
 AppHarbor checks supported locations and detected manager scopes; it does not claim to find every executable or application on the Mac. The Sources and Settings views explain what was detected and which application folders are included.
@@ -33,7 +34,7 @@ The connected client can receive installed software names, versions, and source 
 
 ## Download and install
 
-Download the Apple silicon disk image from the [AppHarbor 0.3.0 release](https://github.com/BillyMRX1/AppHarbor/releases/tag/v0.3.0). Open `AppHarbor-0.3.0-arm64.dmg`, then drag **AppHarbor.app** to **Applications**. Open it from Applications.
+Download the Apple silicon disk image from the [AppHarbor 0.3.1 release](https://github.com/BillyMRX1/AppHarbor/releases/tag/v0.3.1). Open `AppHarbor-0.3.1-arm64.dmg`, then drag **AppHarbor.app** to **Applications**. Open it from Applications.
 
 This preview is ad-hoc signed and not notarized. If macOS blocks launch, see [Apple’s instructions for apps from an unknown developer](https://support.apple.com/guide/mac-help/open-a-mac-app-from-an-unknown-developer-mh40616/mac).
 
@@ -74,7 +75,7 @@ To create the release disk image after building:
 Scripts/package-dmg.sh
 ```
 
-This writes `dist/AppHarbor-0.3.0-arm64.dmg` and includes the drag-to-Applications instructions. Public distribution with a Developer ID signature and notarization is still pending.
+This writes `dist/AppHarbor-0.3.1-arm64.dmg` and includes the drag-to-Applications instructions. Public distribution with a Developer ID signature and notarization is still pending.
 
 ## Local data and uninstall
 

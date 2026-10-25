@@ -21,10 +21,14 @@ final class MCPReviewTests: XCTestCase {
     func testDismissedReviewCannotExecuteCapturedPlan() async throws {
         let fixture = try await makeFixture()
         let plan = try await prepareRemoval(in: fixture)
+        XCTAssertEqual(fixture.model.reviewInstallation?.identity, fixture.installation.identity)
 
+        fixture.model.shortcutMessage = "Test-only current sheet error"
         fixture.model.planDecisionSheetDidPresent()
         fixture.model.planDecision = nil
+        XCTAssertNil(fixture.model.shortcutMessage)
         fixture.model.planDecisionSheetDidDismiss()
+        XCTAssertNil(fixture.model.reviewInstallation)
         await fixture.model.execute(plan)
 
         let runCount = await fixture.runner.runCount
@@ -120,9 +124,13 @@ final class MCPReviewTests: XCTestCase {
     func testProtectedAppBundleRemovalGuideKeepsBlockedDecision() async throws {
         let fixture = try await makeNativeTrashFixture(protected: true)
         defer { if let appRoot = fixture.appRoot { try? FileManager.default.removeItem(at: appRoot) } }
+        var revealed: URL?
+        fixture.model.shortcutService = InstallationShortcutService(reveal: { revealed = $0 }, copy: { _ in })
 
         XCTAssertFalse(fixture.model.nativeTrashRemovalAvailable(for: fixture.installation))
         await fixture.model.openRemovalGuide(for: fixture.installation)
+        fixture.model.selection = [InstallationID(managerID: "another", scopeID: "another", nativeID: "another", canonicalLocation: "/tmp/another.app")]
+        fixture.model.showReviewedInstallationInFinder()
 
         guard case let .blocked(reason)? = fixture.model.planDecision else {
             XCTFail("Protected app bundles must keep the core engine's blocked decision.")
@@ -130,6 +138,8 @@ final class MCPReviewTests: XCTestCase {
         }
         XCTAssertTrue(reason.localizedCaseInsensitiveContains("protected"))
         XCTAssertEqual(fixture.trashExecutor.callCount, 0)
+        XCTAssertEqual(revealed?.path, fixture.installation.canonicalLocation,
+                       "Shortcuts in a blocked guide must remain bound to the app reviewed when the guide opened.")
     }
 
     func testExpiredReviewCannotExecuteCapturedPlan() async throws {

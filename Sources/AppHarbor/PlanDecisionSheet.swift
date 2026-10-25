@@ -5,10 +5,15 @@ import SwiftUI
 struct PlanDecisionSheet: View {
     let decision: PlanDecision
     let mode: PlanSheetMode
+    let installation: Installation?
+    let shortcutMessage: String?
     let reviewContext: String?
     let isExecuting: Bool
     let isCancelling: Bool
     let onConfirm: (ActionPlan) -> Void
+    let onShowInstallation: () -> Void
+    let onShowUninstaller: () -> Void
+    let onCopyPath: () -> Void
     let onCancelOperation: () -> Void
     let onClose: () -> Void
     @FocusState private var cancelFocused: Bool
@@ -40,6 +45,28 @@ struct PlanDecisionSheet: View {
                         Text(reason).foregroundStyle(.secondary).textSelection(.enabled)
                         Text("You can still inspect the installation details or refresh the inventory.")
                             .font(.callout).foregroundStyle(.secondary)
+                    }
+                    if let installation {
+                        Divider()
+                        VStack(alignment: .leading, spacing: 9) {
+                            Text("Installation shortcuts").font(.headline)
+                            VStack(alignment: .leading, spacing: 5) {
+                                Button(action: onShowInstallation) { Label("Show in Finder", systemImage: "folder") }
+                                    .buttonStyle(.link)
+                                if case .success(let uninstaller?) = InstallationShortcutResolver.vendorUninstaller(for: installation) {
+                                    Button(action: onShowUninstaller) { Label("Show Uninstaller in Finder", systemImage: "wrench.and.screwdriver") }
+                                        .buttonStyle(.link)
+                                        .help(uninstaller.path)
+                                }
+                                Button(action: onCopyPath) { Label("Copy Path", systemImage: "doc.on.doc") }
+                                    .buttonStyle(.link)
+                            }
+                            if let shortcutMessage {
+                                Text(shortcutMessage).font(.caption).foregroundStyle(.red)
+                            }
+                            Text("Finder shortcuts only reveal existing items. AppHarbor never opens or runs a vendor uninstaller.")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
                     }
                 }
                 .padding(22)

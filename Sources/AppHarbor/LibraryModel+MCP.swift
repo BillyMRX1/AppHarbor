@@ -92,6 +92,13 @@ extension LibraryModel {
         guard !pendingPlanSheetDismissals.isEmpty else { return }
         let dismissed = pendingPlanSheetDismissals.removeFirst()
         planDecisionSheetDismissalPending = !pendingPlanSheetDismissals.isEmpty
+        if planDecision == nil,
+           planDecisionPresentationToken == dismissed.presentationToken,
+           reviewInstallation?.identity == dismissed.installationID,
+           reviewContextToken == dismissed.reviewContextToken {
+            reviewInstallation = nil
+            reviewContextToken = nil
+        }
         guard let requestID = dismissed.mcpRequestID,
               activeMCPReview?.requestID == requestID else { return }
         expirePendingMCPReviewIfNeeded()
@@ -311,6 +318,9 @@ extension LibraryModel {
         }
 
         planSheetMode = .review
+        reviewInstallation = item
+        reviewContextToken = UUID()
+        shortcutMessage = nil
         switch decision {
         case .ready(let plan):
             let reviewExpiry = min(review.expiresAt, plan.expiresAt)

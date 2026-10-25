@@ -45,6 +45,8 @@ struct MCPPlanProvenance: Sendable {
 struct PlanSheetDismissal: Sendable {
     let presentationToken: UUID
     let mcpRequestID: String?
+    let installationID: InstallationID?
+    let reviewContextToken: UUID?
 }
 
 enum MCPAppResponse {

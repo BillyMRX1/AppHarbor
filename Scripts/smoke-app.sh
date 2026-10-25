@@ -5,8 +5,8 @@ APP_PATH="${APPHARBOR_APP_PATH:-$REPO_ROOT/dist/AppHarbor.app}"
 [[ -x "$APP_PATH/Contents/MacOS/AppHarbor" ]]
 [[ -x "$APP_PATH/Contents/MacOS/AppHarborMCP" ]]
 /usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$APP_PATH/Contents/Info.plist" | grep -qx 'com.appharbor.desktop'
-/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$APP_PATH/Contents/Info.plist" | grep -qx '0.3.0'
-/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$APP_PATH/Contents/Info.plist" | grep -qx '5'
+/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$APP_PATH/Contents/Info.plist" | grep -qx '0.3.1'
+/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$APP_PATH/Contents/Info.plist" | grep -qx '6'
 /usr/libexec/PlistBuddy -c 'Print :CFBundleIconFile' "$APP_PATH/Contents/Info.plist" | grep -qx 'AppHarbor.icns'
 [[ -s "$APP_PATH/Contents/Resources/AppHarbor.icns" ]]
 [[ -s "$APP_PATH/Contents/Resources/ThirdPartyNotices.txt" ]]

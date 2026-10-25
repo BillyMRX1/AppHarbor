@@ -96,12 +96,25 @@ struct MainWindowView: View {
         }
         .sheet(item: $model.planDecision, onDismiss: model.planDecisionSheetDidDismiss) { decision in
             PlanDecisionSheet(decision: decision, mode: model.planSheetMode,
+                              installation: model.reviewInstallation,
+                              shortcutMessage: model.shortcutMessage,
                               reviewContext: model.mcpReviewContext,
                               isExecuting: model.isExecutingOperation, isCancelling: model.isCancellingOperation,
                               onConfirm: { plan in Task { await model.execute(plan) } },
+                              onShowInstallation: model.showReviewedInstallationInFinder,
+                              onShowUninstaller: model.showReviewedUninstallerInFinder,
+                              onCopyPath: model.copyReviewedInstallationPath,
                               onCancelOperation: model.cancelOperation,
                               onClose: { model.planDecision = nil })
                 .onAppear { model.planDecisionSheetDidPresent() }
+        }
+        .alert("Shortcut Unavailable", isPresented: Binding(
+            get: { model.shortcutMessage != nil && model.planDecision == nil },
+            set: { if !$0 { model.shortcutMessage = nil } }
+        )) {
+            Button("OK") { model.shortcutMessage = nil }
+        } message: {
+            Text(model.shortcutMessage ?? "")
         }
         .onChange(of: model.destination) { _, value in
             if case let .source(id) = value { model.sourceFilter = id } else { model.sourceFilter = nil }
@@ -247,6 +260,13 @@ struct LibraryView: View {
 
 @MainActor private func installationMenu(for item: Installation, model: LibraryModel) -> some View {
     Group {
+        Button("Show in Finder") { model.showInstallationInFinder(item) }
+        if case .success(let uninstaller?) = InstallationShortcutResolver.vendorUninstaller(for: item) {
+            Button("Show Uninstaller in Finder") { model.showUninstallerInFinder(item) }
+                .help(uninstaller.path)
+        }
+        Button("Copy Path") { model.copyInstallationPath(item) }
+        Divider()
         Button("How to Remove…") { Task { await model.openRemovalGuide(for: item) } }
             .disabled(model.isExecutingOperation || model.isPreparingPlan || model.planDecision != nil)
         Button(model.usesNativeTrash(for: item) ? "Move to Trash…" : "Remove…", role: .destructive) { Task { await model.prepare(.remove, for: item) } }
@@ -449,6 +469,17 @@ struct InstallationInspector: View {
                         .help(removalDisabledReason(item))
                     Button("How to Remove…") { Task { await model.openRemovalGuide(for: item) } }
                         .buttonStyle(.link)
+                    VStack(alignment: .leading, spacing: 5) {
+                        Button { model.showInstallationInFinder(item) } label: { Label("Show in Finder", systemImage: "folder") }
+                            .buttonStyle(.link)
+                        if case .success(let uninstaller?) = InstallationShortcutResolver.vendorUninstaller(for: item) {
+                            Button { model.showUninstallerInFinder(item) } label: { Label("Show Uninstaller in Finder", systemImage: "wrench.and.screwdriver") }
+                                .buttonStyle(.link)
+                                .help(uninstaller.path)
+                        }
+                        Button { model.copyInstallationPath(item) } label: { Label("Copy Path", systemImage: "doc.on.doc") }
+                            .buttonStyle(.link)
+                    }
                     Text(model.usesNativeTrash(for: item)
                          ? (model.nativeTrashRemovalAvailable(for: item)
                             ? "Moves only this app bundle; installer records and support files may remain. Use the developer’s uninstaller when required."

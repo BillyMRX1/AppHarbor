@@ -26,7 +26,10 @@ final class LibraryModel {
                presentedPlanSheetToken == planDecisionPresentationToken,
                let token = presentedPlanSheetToken {
                 pendingPlanSheetDismissals.append(PlanSheetDismissal(presentationToken: token,
-                                                                     mcpRequestID: presentedPlanSheetMCPRequestID))
+                                                                     mcpRequestID: presentedPlanSheetMCPRequestID,
+                                                                     installationID: reviewInstallation?.identity,
+                                                                     reviewContextToken: reviewContextToken))
+                shortcutMessage = nil
                 planDecisionSheetDismissalPending = true
                 presentedPlanSheetToken = nil
                 presentedPlanSheetMCPRequestID = nil
@@ -39,6 +42,9 @@ final class LibraryModel {
     var presentedPlanSheetMCPRequestID: String?
     var pendingPlanSheetDismissals: [PlanSheetDismissal] = []
     var planSheetMode: PlanSheetMode = .review
+    var reviewInstallation: Installation?
+    var reviewContextToken: UUID?
+    var shortcutMessage: String?
     var isInspectorPresented = true
     var taskRecords: [TaskRecord] = []
     var checkingUpdateIDs: Set<InstallationID> = []
@@ -91,6 +97,7 @@ final class LibraryModel {
     @ObservationIgnored let store: any InstallationStoring
     @ObservationIgnored var preferences: UserDefaults
     @ObservationIgnored var injectedMCPServer: MCPBridgeServer?
+    @ObservationIgnored var shortcutService = InstallationShortcutService()
     @ObservationIgnored var mcpReviewTTL: TimeInterval
     @ObservationIgnored var mcpServer: MCPBridgeServer?
     @ObservationIgnored var mcpExpiryTask: Task<Void, Never>?
@@ -255,6 +262,9 @@ final class LibraryModel {
 
     func prepare(_ operation: ManagedOperation, for installation: Installation) async {
         guard let engine, canChangeConfiguration else { return }
+        reviewInstallation = installation
+        reviewContextToken = UUID()
+        shortcutMessage = nil
         isPreparingPlan = true
         planSheetMode = .review
         let decision = await engine.prepare(operation: operation, installationID: installation.identity)
@@ -264,6 +274,9 @@ final class LibraryModel {
 
     func openRemovalGuide(for installation: Installation) async {
         guard let engine, canChangeConfiguration else { return }
+        reviewInstallation = installation
+        reviewContextToken = UUID()
+        shortcutMessage = nil
         isPreparingPlan = true
         planSheetMode = .guide
         let decision = await engine.prepare(operation: .remove, installationID: installation.identity)
@@ -290,6 +303,45 @@ final class LibraryModel {
         case .blocked(let reason): planDecision = .blocked(reason: reason)
         }
         isPreparingPlan = false
+    }
+
+    func showInstallationInFinder(_ installation: Installation) {
+        switch InstallationShortcutResolver.installationURL(for: installation) {
+        case .success(let url): shortcutService.revealInFinder(url); shortcutMessage = nil
+        case .failure(let error): shortcutMessage = error.localizedDescription
+        }
+    }
+
+    func showReviewedInstallationInFinder() {
+        guard let reviewInstallation else { shortcutMessage = "The reviewed installation is no longer available. Refresh the inventory and open a new review."; return }
+        showInstallationInFinder(reviewInstallation)
+    }
+
+    func showReviewedUninstallerInFinder() {
+        guard let reviewInstallation else { shortcutMessage = "The reviewed installation is no longer available. Refresh the inventory and open a new review."; return }
+        showUninstallerInFinder(reviewInstallation)
+    }
+
+    func showUninstallerInFinder(_ installation: Installation) {
+        switch InstallationShortcutResolver.vendorUninstaller(for: installation) {
+        case .failure(let error): shortcutMessage = error.localizedDescription
+        case .success(let url):
+            guard let url else { shortcutMessage = "No existing vendor uninstaller was detected inside this app bundle."; return }
+            shortcutService.revealInFinder(url)
+            shortcutMessage = nil
+        }
+    }
+
+    func copyReviewedInstallationPath() {
+        guard let reviewInstallation else { shortcutMessage = "The reviewed installation is no longer available. Refresh the inventory and open a new review."; return }
+        copyInstallationPath(reviewInstallation)
+    }
+
+    func copyInstallationPath(_ installation: Installation) {
+        switch InstallationShortcutResolver.installationURL(for: installation) {
+        case .failure(let error): shortcutMessage = error.localizedDescription
+        case .success(let url): shortcutService.copyPath(url.path); shortcutMessage = nil
+        }
     }
 
     func checkUpdate(for installation: Installation) async {
