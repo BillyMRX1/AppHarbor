@@ -5,6 +5,7 @@ import SwiftUI
 struct PlanDecisionSheet: View {
     let decision: PlanDecision
     let mode: PlanSheetMode
+    let reviewContext: String?
     let isExecuting: Bool
     let isCancelling: Bool
     let onConfirm: (ActionPlan) -> Void
@@ -23,6 +24,12 @@ struct PlanDecisionSheet: View {
                                 .font(.callout.weight(.medium))
                         }
                         .accessibilityElement(children: .combine)
+                    }
+                    if let reviewContext {
+                        Label(reviewContext, systemImage: "network")
+                            .font(.callout)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
                     switch decision {
                     case .ready(let plan): review(plan)

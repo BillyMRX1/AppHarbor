@@ -19,6 +19,7 @@ struct SettingsView: View {
                 generalTab.tabItem { Label("General", systemImage: "gearshape") }.tag("General")
                 managerPathsTab.tabItem { Label("Sources", systemImage: "shippingbox") }.tag("Sources")
                 privacyTab.tabItem { Label("Privacy", systemImage: "hand.raised") }.tag("Privacy")
+                mcpTab.tabItem { Label("AI clients", systemImage: "network") }.tag("AI clients")
             }
             .padding(18)
         }
@@ -96,6 +97,49 @@ struct SettingsView: View {
             Section("Permissions") {
                 Text("Baseline inventory does not require root, Full Disk Access, or Accessibility access. Inaccessible locations remain partial.")
                     .font(.callout).foregroundStyle(.secondary)
+            }
+        }
+        .formStyle(.grouped)
+    }
+
+    private var mcpTab: some View {
+        Form {
+            Section("Local MCP bridge") {
+                Toggle("Enable local MCP bridge", isOn: $model.mcpBridgeEnabled)
+                Label(model.mcpBridgeStatus, systemImage: model.mcpBridgeEnabled ? "network" : "network.slash")
+                    .font(.callout).foregroundStyle(.secondary)
+                if model.mcpBridgeEnabled && model.mcpBridgeStatus.hasPrefix("Could not start") {
+                    Button("Retry Bridge", action: model.retryMCPBridge)
+                }
+                Toggle("Allow AI action requests", isOn: $model.mcpActionRequestsEnabled)
+                    .disabled(!model.mcpBridgeEnabled)
+                Text("Both settings start off. A connected AI client can receive installed software names, versions, and paths. AppHarbor must remain open for the local bridge to work.")
+                    .font(.callout).foregroundStyle(.secondary)
+                Text("AI requests can ask AppHarbor to prepare a supported removal or update for your review. They cannot run arbitrary shell commands or clean files. An operation runs only after you review and confirm it in AppHarbor.")
+                    .font(.callout).foregroundStyle(.secondary)
+            }
+            Section("Client configuration") {
+                Text("Copy this generic MCP configuration into your client yourself. AppHarbor does not change client configuration files.")
+                    .font(.callout).foregroundStyle(.secondary)
+                Text(model.mcpConfigurationJSON)
+                    .font(.system(.caption, design: .monospaced))
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(8)
+                    .background(.quaternary.opacity(0.35), in: RoundedRectangle(cornerRadius: 8))
+                HStack {
+                    Button("Copy MCP Configuration", action: model.copyMCPConfiguration)
+                    Spacer()
+                }
+                if !model.isMCPHelperAvailable {
+                    Label("This app bundle does not include the AppHarbor MCP helper yet.", systemImage: "exclamationmark.triangle")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+            }
+            Section("Request status") {
+                Text(model.mcpLatestRequestStatus)
+                    .font(.callout).foregroundStyle(.secondary)
+                    .textSelection(.enabled)
             }
         }
         .formStyle(.grouped)

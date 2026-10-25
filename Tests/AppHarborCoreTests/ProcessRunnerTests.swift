@@ -86,8 +86,8 @@ final class ProcessRunnerTests: XCTestCase {
     func testContinuousOutputCannotStarveTimeoutChecks() async throws {
         let start = Date()
         let result = try await runner.run(ProcessCommand(
-            executablePath: python,
-            arguments: ["-c", "import os\nwhile True: os.write(1,b'x'*8192)"],
+            executablePath: "/usr/bin/yes",
+            arguments: [String(repeating: "x", count: 8192)],
             timeout: 0.3,
             maximumOutputBytes: 1024
         ))

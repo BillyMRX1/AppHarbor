@@ -3,7 +3,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/BillyMRX1/AppHarbor/releases/download/v0.1.2/AppHarbor-0.1.2-arm64.dmg"><strong>Download AppHarbor 0.1.2 · Apple silicon</strong></a>
+  <a href="https://github.com/BillyMRX1/AppHarbor/releases/download/v0.2.0/AppHarbor-0.2.0-arm64.dmg"><strong>Download AppHarbor 0.2.0 · Apple silicon</strong></a>
   &nbsp;·&nbsp; <a href="https://github.com/BillyMRX1/AppHarbor/releases">Releases</a>
   &nbsp;·&nbsp; <a href="LICENSE">MIT License</a>
 </p>
@@ -25,9 +25,15 @@ AppHarbor brings supported Mac applications and package-manager installs into on
 
 AppHarbor checks supported locations and detected manager scopes; it does not claim to find every executable or application on the Mac. The Sources and Settings views explain what was detected and which application folders are included.
 
+## MCP and AI clients
+
+AppHarbor includes an optional local MCP bridge for compatible AI clients. The bridge and AI action requests are separate settings, and both are off by default. Settings can copy a generic client configuration for the installed app; AppHarbor does not edit a client configuration automatically. Keep AppHarbor open while a connected client uses it. See [MCP setup and tool details](Docs/MCP.md).
+
+The connected client can receive installed software names, versions, and source paths, and its provider may forward that context to a model service. AI action requests are limited to supported removal and update reviews. AppHarbor shows the exact target in its native interface, and a person must confirm there before execution. The bridge does not provide arbitrary shell commands, filesystem access, batch uninstall, junk cleanup, or root operations.
+
 ## Download and install
 
-Download the Apple silicon disk image from the [AppHarbor 0.1.2 release](https://github.com/BillyMRX1/AppHarbor/releases/tag/v0.1.2). Open `AppHarbor-0.1.2-arm64.dmg`, then drag **AppHarbor.app** to **Applications**. Open it from Applications.
+Download the Apple silicon disk image from the [AppHarbor 0.2.0 release](https://github.com/BillyMRX1/AppHarbor/releases/tag/v0.2.0). Open `AppHarbor-0.2.0-arm64.dmg`, then drag **AppHarbor.app** to **Applications**. Open it from Applications.
 
 This preview is ad-hoc signed and not notarized. If macOS blocks launch, see [Apple’s instructions for apps from an unknown developer](https://support.apple.com/guide/mac-help/open-a-mac-app-from-an-unknown-developer-mh40616/mac).
 
@@ -47,7 +53,7 @@ Update checks are explicit and run per installation. They do not run automatical
 
 ## Build from source
 
-**Requirements:** macOS 14 or later, an Apple silicon Mac, and Xcode with a Swift 6 toolchain.
+**Requirements:** macOS 14 or later, an Apple silicon Mac, and Xcode with Swift 6.2 or later.
 
 ```sh
 Scripts/build-app.sh
@@ -56,6 +62,7 @@ Scripts/smoke-app.sh
 ```
 
 The app bundle is created at `dist/AppHarbor.app`. The build signs it locally with an ad-hoc signature and does not need Developer ID credentials. The current release build targets Apple silicon. Intel support has not been verified.
+The bundled `Contents/Resources/ThirdPartyNotices.txt` contains license texts for the resolved Swift package dependencies.
 
 To create the release disk image after building:
 
@@ -63,7 +70,7 @@ To create the release disk image after building:
 Scripts/package-dmg.sh
 ```
 
-This writes `dist/AppHarbor-0.1.2-arm64.dmg` and includes the drag-to-Applications instructions. Public distribution with a Developer ID signature and notarization is still pending.
+This writes `dist/AppHarbor-0.2.0-arm64.dmg` and includes the drag-to-Applications instructions. Public distribution with a Developer ID signature and notarization is still pending.
 
 ## Local data and uninstall
 

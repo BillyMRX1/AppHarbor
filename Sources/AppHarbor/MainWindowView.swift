@@ -94,12 +94,14 @@ struct MainWindowView: View {
                 .disabled(model.selectedInstallation == nil)
             }
         }
-        .sheet(item: $model.planDecision) { decision in
+        .sheet(item: $model.planDecision, onDismiss: model.planDecisionSheetDidDismiss) { decision in
             PlanDecisionSheet(decision: decision, mode: model.planSheetMode,
+                              reviewContext: model.mcpReviewContext,
                               isExecuting: model.isExecutingOperation, isCancelling: model.isCancellingOperation,
                               onConfirm: { plan in Task { await model.execute(plan) } },
                               onCancelOperation: model.cancelOperation,
                               onClose: { model.planDecision = nil })
+                .onAppear { model.planDecisionSheetDidPresent() }
         }
         .onChange(of: model.destination) { _, value in
             if case let .source(id) = value { model.sourceFilter = id } else { model.sourceFilter = nil }

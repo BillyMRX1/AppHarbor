@@ -1,4 +1,5 @@
 import AppHarborCore
+import AppHarborMCPBridge
 import Foundation
 import Observation
 import SwiftUI
@@ -10,7 +11,7 @@ final class LibraryModel {
     var selection: Set<InstallationID> = []
     var destination: SidebarDestination = .allSoftware
     var libraryViewMode: LibraryViewMode = .list {
-        didSet { UserDefaults.standard.set(libraryViewMode.rawValue, forKey: "AppHarbor.libraryViewMode") }
+        didSet { preferences.set(libraryViewMode.rawValue, forKey: "AppHarbor.libraryViewMode") }
     }
     var searchText = ""
     var kindFilter: ItemKindFilter = .all
@@ -18,7 +19,25 @@ final class LibraryModel {
     var isRefreshing = false
     var refreshError: String?
     var storageStatus: StorageStatus = .available
-    var planDecision: PlanDecision?
+    var planDecision: PlanDecision? {
+        didSet {
+            if oldValue == nil, planDecision != nil { planDecisionPresentationToken = UUID() }
+            if oldValue != nil, planDecision == nil,
+               presentedPlanSheetToken == planDecisionPresentationToken,
+               let token = presentedPlanSheetToken {
+                pendingPlanSheetDismissals.append(PlanSheetDismissal(presentationToken: token,
+                                                                     mcpRequestID: presentedPlanSheetMCPRequestID))
+                planDecisionSheetDismissalPending = true
+                presentedPlanSheetToken = nil
+                presentedPlanSheetMCPRequestID = nil
+            }
+        }
+    }
+    var planDecisionSheetDismissalPending = false
+    var planDecisionPresentationToken = UUID()
+    var presentedPlanSheetToken: UUID?
+    var presentedPlanSheetMCPRequestID: String?
+    var pendingPlanSheetDismissals: [PlanSheetDismissal] = []
     var planSheetMode: PlanSheetMode = .review
     var isInspectorPresented = true
     var taskRecords: [TaskRecord] = []
@@ -27,7 +46,9 @@ final class LibraryModel {
     var isExecutingOperation = false
     var isCancellingOperation = false
     var customScanLocations: [URL] = []
-    var canChangeConfiguration: Bool { !isRefreshing && !isExecutingOperation && !isPreparingPlan && planDecision == nil }
+    var canChangeConfiguration: Bool {
+        !isRefreshing && !isExecutingOperation && !isPreparingPlan && planDecision == nil && !planDecisionSheetDismissalPending
+    }
 
     var homebrewExecutablesText = ""
     var npmExecutablesText = ""
@@ -37,24 +58,69 @@ final class LibraryModel {
     var cargoExecutablesText = ""
     var cargoRootsText = ""
 
-    @ObservationIgnored private var engine: AppHarborCoreEngine?
+    var mcpBridgeEnabled = false {
+        didSet {
+            guard oldValue != mcpBridgeEnabled else { return }
+            preferences.set(mcpBridgeEnabled, forKey: "AppHarbor.mcpBridgeEnabled")
+            mcpConfigurationGeneration &+= 1
+            if mcpBridgeEnabled { startMCPBridge() }
+            else {
+                stopMCPBridge()
+                invalidatePendingMCPReview(message: "The local bridge was turned off before confirmation.")
+            }
+        }
+    }
+    var mcpActionRequestsEnabled = false {
+        didSet {
+            guard oldValue != mcpActionRequestsEnabled else { return }
+            preferences.set(mcpActionRequestsEnabled, forKey: "AppHarbor.mcpActionRequestsEnabled")
+            mcpConfigurationGeneration &+= 1
+            if !mcpActionRequestsEnabled {
+                invalidatePendingMCPReview(message: "AI action requests were turned off before confirmation.")
+            }
+        }
+    }
+    var mcpBridgeStatus = "Off"
+    var mcpLatestRequestStatus = "No requests yet"
+    var mcpReviewContext: String? { activeMCPReview.map { "Requested by a connected AI client for \($0.displayName). Review this exact target and command yourself in AppHarbor." } }
+
+    @ObservationIgnored var engine: AppHarborCoreEngine?
     @ObservationIgnored private var eventTask: Task<Void, Never>?
     @ObservationIgnored private var refreshTask: Task<InventorySnapshot, Never>?
-    @ObservationIgnored private var operationTask: Task<TaskRecord, Never>?
-    @ObservationIgnored private let store: any InstallationStoring
+    @ObservationIgnored var operationTask: Task<TaskRecord, Never>?
+    @ObservationIgnored let store: any InstallationStoring
+    @ObservationIgnored var preferences: UserDefaults
+    @ObservationIgnored var injectedMCPServer: MCPBridgeServer?
+    @ObservationIgnored var mcpReviewTTL: TimeInterval
+    @ObservationIgnored var mcpServer: MCPBridgeServer?
+    @ObservationIgnored var mcpExpiryTask: Task<Void, Never>?
+    @ObservationIgnored var mcpConfigurationGeneration = 0
+    @ObservationIgnored var mcpBridgeGeneration = 0
+    @ObservationIgnored var activeMCPReview: PendingMCPReview?
+    @ObservationIgnored var mcpRequestRecords: [String: MCPRequestRecord] = [:]
+    @ObservationIgnored var mcpRequestOrder: [String] = []
+    @ObservationIgnored var mcpPlanProvenance: [UUID: MCPPlanProvenance] = [:]
+    @ObservationIgnored var mcpPlanProvenanceOrder: [UUID] = []
 
-    init(engine: AppHarborCoreEngine? = nil) {
-        let defaults = UserDefaults.standard
+    init(engine: AppHarborCoreEngine? = nil,
+         store injectedStore: (any InstallationStoring)? = nil,
+         preferences: UserDefaults = .standard,
+         mcpServer: MCPBridgeServer? = nil,
+         mcpReviewTTL: TimeInterval = 300) {
+        self.preferences = preferences
+        self.injectedMCPServer = mcpServer
+        self.mcpReviewTTL = mcpReviewTTL
+        let defaults = preferences
         libraryViewMode = LibraryViewMode(rawValue: defaults.string(forKey: "AppHarbor.libraryViewMode") ?? "") ?? .list
         customScanLocations = (defaults.stringArray(forKey: "AppHarbor.scanLocations") ?? []).map(URL.init(fileURLWithPath:))
-        homebrewExecutablesText = Self.loadPaths("homebrewExecutables")
-        npmExecutablesText = Self.loadPaths("npmExecutables")
-        npmNodeExecutablesText = Self.loadPaths("npmNodeExecutables")
-        pipxExecutablesText = Self.loadPaths("pipxExecutables")
-        pipxHomesText = Self.loadPaths("pipxHomes")
-        cargoExecutablesText = Self.loadPaths("cargoExecutables")
-        cargoRootsText = Self.loadPaths("cargoRoots")
-        let store = LocalJSONInstallationStore.applicationDefault()
+        homebrewExecutablesText = Self.loadPaths("homebrewExecutables", defaults: defaults)
+        npmExecutablesText = Self.loadPaths("npmExecutables", defaults: defaults)
+        npmNodeExecutablesText = Self.loadPaths("npmNodeExecutables", defaults: defaults)
+        pipxExecutablesText = Self.loadPaths("pipxExecutables", defaults: defaults)
+        pipxHomesText = Self.loadPaths("pipxHomes", defaults: defaults)
+        cargoExecutablesText = Self.loadPaths("cargoExecutables", defaults: defaults)
+        cargoRootsText = Self.loadPaths("cargoRoots", defaults: defaults)
+        let store = injectedStore ?? (engine == nil ? LocalJSONInstallationStore.applicationDefault() : InMemoryInstallationStore())
         self.store = store
         let paths = ManagerPathConfiguration(homebrewExecutables: Self.lines(homebrewExecutablesText),
                                              npmExecutables: Self.lines(npmExecutablesText),
@@ -65,12 +131,15 @@ final class LibraryModel {
                                              cargoRoots: Self.lines(cargoRootsText))
         let connectedEngine = engine ?? CoreEngineFactory.make(scanRoots: customScanLocations.map(\.path), paths: paths, store: store)
         self.engine = connectedEngine
+        mcpBridgeEnabled = defaults.bool(forKey: "AppHarbor.mcpBridgeEnabled")
+        mcpActionRequestsEnabled = defaults.bool(forKey: "AppHarbor.mcpActionRequestsEnabled")
         observe(connectedEngine)
         Task {
             snapshot = await connectedEngine.currentSnapshot()
             taskRecords = await store.loadTasks()
             storageStatus = await connectedEngine.storageStatus()
         }
+        if mcpBridgeEnabled { startMCPBridge() }
     }
 
     private func configuredPaths() -> ManagerPathConfiguration {
@@ -105,7 +174,7 @@ final class LibraryModel {
         }
     }
 
-    private func upsert(_ record: TaskRecord) {
+    func upsert(_ record: TaskRecord) {
         if let index = taskRecords.firstIndex(where: { $0.id == record.id }) { taskRecords[index] = record }
         else { taskRecords.insert(record, at: 0) }
         taskRecords = Array(taskRecords.sorted { $0.startedAt > $1.startedAt }.prefix(200))
@@ -152,8 +221,9 @@ final class LibraryModel {
         }.sorted { $0.displayName.localizedStandardCompare($1.displayName) == .orderedAscending }
     }
 
-    func refresh() async {
-        guard let engine, refreshTask == nil else { return }
+    func refresh(reservationAlreadySet: Bool = false) async {
+        guard let engine, refreshTask == nil,
+              reservationAlreadySet ? isRefreshing : !isRefreshing else { return }
         isRefreshing = true
         refreshError = nil
         let task = Task { await engine.refresh() }
@@ -167,7 +237,7 @@ final class LibraryModel {
     func cancelRefresh() { refreshTask?.cancel() }
 
     func prepare(_ operation: ManagedOperation, for installation: Installation) async {
-        guard let engine, !isExecutingOperation, !isPreparingPlan, planDecision == nil else { return }
+        guard let engine, canChangeConfiguration else { return }
         isPreparingPlan = true
         planSheetMode = .review
         let decision = await engine.prepare(operation: operation, installationID: installation.identity)
@@ -176,7 +246,7 @@ final class LibraryModel {
     }
 
     func openRemovalGuide(for installation: Installation) async {
-        guard let engine, !isExecutingOperation, !isPreparingPlan, planDecision == nil else { return }
+        guard let engine, canChangeConfiguration else { return }
         isPreparingPlan = true
         planSheetMode = .guide
         let decision = await engine.prepare(operation: .remove, installationID: installation.identity)
@@ -202,22 +272,6 @@ final class LibraryModel {
         _ = await engine.checkUpdate(installationID: installation.identity)
     }
 
-    func execute(_ plan: ActionPlan) async {
-        guard let engine, operationTask == nil else { return }
-        isExecutingOperation = true
-        isCancellingOperation = false
-        let task = Task { await engine.execute(planID: plan.id, confirmed: true) }
-        operationTask = task
-        let record = await task.value
-        upsert(record)
-        snapshot = await engine.currentSnapshot()
-        storageStatus = await engine.storageStatus()
-        operationTask = nil
-        isExecutingOperation = false
-        isCancellingOperation = false
-        planDecision = nil
-    }
-
     func cancelOperation() {
         guard operationTask != nil else { return }
         isCancellingOperation = true
@@ -226,7 +280,7 @@ final class LibraryModel {
 
     func applyManagerPaths() {
         guard canChangeConfiguration else { return }
-        let defaults = UserDefaults.standard
+        let defaults = preferences
         defaults.set(Self.lines(homebrewExecutablesText), forKey: "AppHarbor.homebrewExecutables")
         defaults.set(Self.lines(npmExecutablesText), forKey: "AppHarbor.npmExecutables")
         defaults.set(Self.lines(npmNodeExecutablesText), forKey: "AppHarbor.npmNodeExecutables")
@@ -240,23 +294,23 @@ final class LibraryModel {
     func addScanLocation(_ url: URL) {
         guard !customScanLocations.contains(url), canChangeConfiguration else { return }
         customScanLocations.append(url)
-        UserDefaults.standard.set(customScanLocations.map(\.path), forKey: "AppHarbor.scanLocations")
+        preferences.set(customScanLocations.map(\.path), forKey: "AppHarbor.scanLocations")
         reconnectEngine()
     }
 
     func removeScanLocation(_ url: URL) {
         guard canChangeConfiguration else { return }
         customScanLocations.removeAll { $0 == url }
-        UserDefaults.standard.set(customScanLocations.map(\.path), forKey: "AppHarbor.scanLocations")
+        preferences.set(customScanLocations.map(\.path), forKey: "AppHarbor.scanLocations")
         reconnectEngine()
     }
 
-    private static func loadPaths(_ key: String) -> String { (UserDefaults.standard.stringArray(forKey: "AppHarbor.\(key)") ?? []).joined(separator: "\n") }
+    private static func loadPaths(_ key: String, defaults: UserDefaults) -> String { (defaults.stringArray(forKey: "AppHarbor.\(key)") ?? []).joined(separator: "\n") }
     private static func lines(_ text: String) -> [String] {
         text.split(whereSeparator: \.isNewline).map { ($0.trimmingCharacters(in: .whitespacesAndNewlines) as NSString).expandingTildeInPath }.filter { !$0.isEmpty && $0.hasPrefix("/") }
     }
 
-    deinit { eventTask?.cancel(); refreshTask?.cancel(); operationTask?.cancel() }
+    deinit { eventTask?.cancel(); refreshTask?.cancel(); operationTask?.cancel(); mcpExpiryTask?.cancel(); mcpServer?.stop() }
 }
 
 enum SidebarDestination: Hashable {
